@@ -1,0 +1,74 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage[margin=.8in, paperwidth=8.5in, paperheight=11in]{geometry}
+\usepackage{multicol,listings}
+
+\lstset{
+    literate={~} {$\sim$}{1}
+}
+
+\begin{document}
+
+
+\title{Project Notes - 1}
+\author{Joseph Grant}
+\maketitle
+
+
+\begin{multicols*}{2}
+
+\section{V-REP as a ROS Node}
+\indent \indent As a ROS node, V-REP can communicate with other ROS nodes using ROS services, publishers and subscribers. This is accomplished using the RosInterface API provided by Coppelia Robotics. These instructions were created for an Ubuntu 16.04 LTS system running ROS Kinetic and V-REP 3.4.0. 
+\\
+\indent To setup RosInterface with V-REP 
+\begin{enumerate}
+\item Download the V-REPs stub generator and install the software it needs. 
+\begin{lstlisting}[language=bash,breaklines=true]
+sudo apt-get install -y git cmake python-tempita python-catkin-tools python-lxml 
+git clone -q https://github.com/fferri/v_repStubsGen.git
+\end{lstlisting}
+\item Add path of V-REP stubs generator to the search path of python 
+\begin{lstlisting}[language=bash,breaklines=true]
+export PYTHONPATH=$PYTHONPATH:$PWD
+\end{lstlisting}
+\item Create the catkin workspace and initialize it 
+\begin{lstlisting}[language=bash,breaklines=true]
+mkdir -p ~/project_ws/src
+cd ~/project_ws
+catkin init
+\end{lstlisting}
+\item Download RosInterface and build it 
+\begin{lstlisting}[language=bash,breaklines=true]
+cd src/
+git clone --recursive https://github.com/fferri/v_repExtRosInterface.git vrep_ros_interface
+catkin build
+\end{lstlisting}
+\item Source project workspace
+\begin{lstlisting}[language=bash,breaklines=true]
+source ../devel/setup.bash
+\end{lstlisting}
+\item Add VREP\_ROOT to the bashrc, assuming it is located in the home folder. Then copy the RosInterface library which was compiled earlier to the V-REP folder.
+\begin{lstlisting}[language=bash,breaklines=true]
+echo 'export VREP_ROOT="/home/user/V-REP_PRO_EDU_V3_3_2_64_Linux/"' >> ~/.bashrc 
+source ~/.bashrc
+cp -iv devel/lib/libv_repExtRosInterface.so "$VREP_ROOT/"
+\end{lstlisting}
+\item Setup alias for v-rep 
+\begin{lstlisting}[language=bash,breaklines=true]
+echo 'alias vrep="$VREP_ROOT/vrep.sh"' >> ~/.bashrc 
+\end{lstlisting}
+\item This setup procedure can be validated by running ROS and V-REP, then listing the active ROS nodes. Each command is ran in its own terminal. 
+\begin{lstlisting}[language=bash,breaklines=true]
+roscore
+vrep
+rosnode list
+\end{lstlisting}
+\end{enumerate}
+To validate the functionality of the RosInterface the predefined scenes rosInterfaceTopicPublisherAndSubscriber.ttt and controlTypeExamples.ttt can be used. 
+\end{multicols*}
+ 
+\end{document}
+ 
+\begin{lstlisting}[language=bash,breaklines=true]
+\end{lstlisting}
