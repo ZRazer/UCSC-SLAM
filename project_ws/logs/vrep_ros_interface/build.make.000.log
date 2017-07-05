@@ -1,0 +1,22 @@
+[35m[1mScanning dependencies of target tf2_msgs_generate_messages_nodejs[0m
+[35m[1mScanning dependencies of target tf2_msgs_generate_messages_lisp[0m
+[35m[1mScanning dependencies of target actionlib_msgs_generate_messages_lisp[0m
+[35m[1mScanning dependencies of target generate_ros_code[0m
+[  0%] Built target tf2_msgs_generate_messages_lisp
+[  0%] Built target tf2_msgs_generate_messages_nodejs
+[  0%] Built target actionlib_msgs_generate_messages_lisp
+[  5%] [34m[1mGenerating generated/srvcall.cpp[0m
+[35m[1mScanning dependencies of target tf2_msgs_generate_messages_eus[0m
+[35m[1mScanning dependencies of target std_msgs_generate_messages_eus[0m
+[35m[1mScanning dependencies of target sensor_msgs_generate_messages_cpp[0m
+python: can't open file '/home/joseph/project_ws/src/vrep_ros_interface/external/v_repStubsGen/external/pycpp/pycpp.py': [Errno 2] No such file or directory
+CMakeFiles/generate_ros_code.dir/build.make:71: recipe for target 'generated/srvcall.cpp' failed
+make[2]: *** [generated/srvcall.cpp] Error 2
+CMakeFiles/Makefile2:67: recipe for target 'CMakeFiles/generate_ros_code.dir/all' failed
+make[1]: *** [CMakeFiles/generate_ros_code.dir/all] Error 2
+make[1]: *** Waiting for unfinished jobs....
+[  5%] Built target sensor_msgs_generate_messages_cpp
+[  5%] Built target std_msgs_generate_messages_eus
+[  5%] Built target tf2_msgs_generate_messages_eus
+Makefile:138: recipe for target 'all' failed
+make: *** [all] Error 2
