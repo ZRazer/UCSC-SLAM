@@ -1,4 +1,0 @@
-Symlinking /home/joseph/project_ws/devel/share/vrep_ros_interface/cmake/vrep_ros_interfaceConfig.cmake
-Symlinking /home/joseph/project_ws/devel/share/vrep_ros_interface/cmake/vrep_ros_interfaceConfig-version.cmake
-Symlinking /home/joseph/project_ws/devel/lib/libv_repExtRosInterface.so
-Symlinking /home/joseph/project_ws/devel/lib/pkgconfig/vrep_ros_interface.pc
