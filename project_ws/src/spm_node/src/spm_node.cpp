@@ -12,11 +12,6 @@
 #include <vector>
 #include <cmath>
 
-// Will use this for demonstration and debug purposes to show how 
-// split_and_merge iterates over dataset
-#define SLOWDOWN
-
-
 struct Point
 {
 	double _x, _y;
@@ -168,7 +163,7 @@ public:
 		pcl::fromROSMsg(output,msg_);
 
 	// Set ground reference point
-		float ground = .4;
+		float ground = 0.3;
 
 	// Filter points by z-coord and add to points vector
 		int nPoints = msg_.points.size();
@@ -217,7 +212,7 @@ public:
 					geometry_msgs::Point p;
 					p.x = lines[i].xmean;;
 					p.y = y;
-					p.z = 0;
+					p.z = 0.5;
 
 					line_strip.points.push_back(p);
 				}
@@ -231,7 +226,7 @@ public:
 					geometry_msgs::Point p;
 					p.x = x;
 					p.y = y;
-					p.z = 0;
+					p.z = 0.5;
 
 					line_strip.points.push_back(p);
 				}
@@ -245,15 +240,13 @@ public:
 	std::vector<Line> split_and_merge(std::vector<Point> S)
 	{
 		ROS_DEBUG("Running split and merge on set S:");
-		std::vector<Point> temp_p1;
-		std::vector<Point> temp_p2;
+		std::vector<Point> temp_p1, temp_p2, temp_p3;
 		std::vector< std::vector<Point> > points;
 		std::vector<Line> lines;
-		ros::Rate r(1);
 		Line line;
 		int nSets, nPts;
-		double threshold = 0.8;
-		bool split_and_extract = true;
+		double threshold = 1e-3;
+		bool split_and_extract = true, merged;
 		points.push_back(S);
 
 		while (split_and_extract)
@@ -264,7 +257,6 @@ public:
 			for (int i=0;i<nSets;i++)
 			{
 			//fit line to points
-				//ROS_DEBUG("Try to fit line to set S-%i " , i);
 				if (line.fitPoints(points[i]) != true)
 				{
 					// Remove singular set and do not fit line to it
@@ -275,8 +267,6 @@ public:
 				{
 					lines.push_back(line);
 				}
-				//ROS_DEBUG("Succesfully fit a line to points.");
-				
 			}
 
 			nSets = lines.size();
@@ -360,9 +350,55 @@ public:
 			}
 		}
 
-	// Here we would perform merging
+	// Attempt merging co-linear lines 
+		for (int i=0;i<(lines.size()-1);i++)
+		{
+			merged = false;
+		// check if lines co-linear with rest of lines in set 
+			for (int j=i+1;j<lines.size();j++)
+			{
+				if(merged)
+				{
+					i--;
+					break;
+				}
+			// if co-linear check fit, otherwise change nothing
+				if(lines[i]._slope-lines[j]._slope < 1e-2 || lines[i].vline && lines[j].vline)
+				{
+					ROS_DEBUG("Checking if co-linear lines can be merged");
+					temp_p3.clear();
+				// First add all points into temp set 3
+					for(int k=0;k<points[i].size();k++)
+					{
+						temp_p3.push_back(points[i][k]);
+					}
+					for(int k=0;k<points[j].size();k++)
+					{
+						temp_p3.push_back(points[j][k]);
+					}
+
+				// check R value of line fit to see if we are merging
+					if (line.fitPoints(temp_p3) == true)
+					{
+					// if line works remove old lines and sets of points, add new line and set
+						if(line.R < threshold)
+						{
+							ROS_DEBUG("From set of %lu lines, merging lines %i and %i.",lines.size(),i,j);
+							lines.erase(lines.begin() + i);
+							points.erase(points.begin() + i);
+							lines.erase(lines.begin() + j-1);
+							points.erase(points.begin() + j-1);
+							points.push_back(temp_p3);
+							lines.push_back(line);
+							merged = true;
+						}
+					}
+				}
+			}
+
+		}
 		nSets = lines.size();
-		ROS_DEBUG("Found %i lines to fit PointCloud. ",nSets);
+		ROS_INFO("Found %i lines to fit PointCloud. ",nSets);
 		return lines;
 	}
 
