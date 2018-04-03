@@ -24,12 +24,12 @@ struct Point
 
 struct Line 
 {
-	double _slope, _yInt, xmin, xmax, xmean, ymin, ymax, out_x, out_y, R;
+	double _slope, _yInt, xmin, xmax, xmean, ymean, ymin, ymax, out_x, out_y, R;
 	bool vline;
 	double getYforX(double x) {
 		if(vline)
 		{
-			ROS_DEBUG("Called getYforX for vline");
+			ROS_INFO("Called getYforX for vline");
 		}
 		else
 		{
@@ -72,8 +72,8 @@ struct Line
 
 		// prep for finding LSRL
 		xmean = sumX / nPoints;
-		double yMean = sumY / nPoints;
-		double denominator = sumX2 - sumX * xmean;
+		ymean = sumY / nPoints;
+		double denominator = (nPoints*sumX2) - (sumX*sumX);
 		double delta, temp = 0;
 
 		// Check for vertical line
@@ -92,13 +92,13 @@ struct Line
 				}
 			}
 			R = temp;
-			ROS_DEBUG("Found line: x = %f , R val: %f ", xmean,R);
+			ROS_INFO("Found line: x = %f , R val: %f ", xmean,R);
 		}
 		else 
 		{
 			vline = false;
-			_slope = (sumXY - sumX * yMean) / denominator;
-			_yInt = yMean - _slope * xmean;
+			_slope = ((nPoints*sumXY) - (sumX*sumY)) / denominator;
+			_yInt = (sumY - (_slope*sumX))/nPoints;
 			// Find outlier
 			for(int i=0; i<nPoints; i++) 
 			{
@@ -112,7 +112,7 @@ struct Line
 				}
 			}
 			R = temp;
-			ROS_DEBUG("Found line: y = %fx + %f , R val: %f ", _slope,_yInt,R);
+			ROS_INFO("Found line: y = %fx + %f , R val: %f ", _slope,_yInt,R);
 		}
 		return true;
 	}
@@ -128,13 +128,13 @@ public:
 
   // Create a ROS publisher for the extracted lines
 		marker_pub = nh.advertise<visualization_msgs::Marker>("/visualization_marker", 10);
-		ROS_DEBUG("Initialized cloud_parse object...");
+		ROS_INFO("Initialized cloud_parse object...");
 	}
 
   // Callback function upon recieving point cloud
 	void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 	{
-		ROS_DEBUG("Running cb for recieved point cloud.");
+		ROS_INFO("Running cb for recieved point cloud.");
 		std::vector<Point> points;
 		points.clear();
 		std::vector<Line> lines;
@@ -144,6 +144,7 @@ public:
 		pcl::PCLPointCloud2* cloud = new pcl::PCLPointCloud2; 
 		pcl::PCLPointCloud2ConstPtr cloudPtr(cloud);
 		pcl::PCLPointCloud2 cloud_filtered;
+		ros::Rate r(100);
 
   // Convert to PCL data type
 		pcl_conversions::toPCL(*cloud_msg, *cloud);
@@ -174,7 +175,8 @@ public:
 				temp._x = msg_.points[i].x;
 				temp._y = msg_.points[i].y;
 				points.push_back(temp);
-				ROS_DEBUG("Adding point (%f,%f) to set S. ",temp._x,temp._y);
+				ROS_INFO("Adding point (%f,%f) to set S. ",temp._x,temp._y);
+				r.sleep();
 			}
 		}
 
@@ -200,7 +202,7 @@ public:
 
     // Create the vertices for the points and lines
 		int nLines = lines.size();
-		ROS_DEBUG("Publishing %i lines.", nLines);
+		ROS_INFO("Publishing %i lines.", nLines);
 		double x,y;
 		for (int i=0;i<nLines;i++)
 		{
@@ -239,7 +241,7 @@ public:
 	// Function runs split and merge algorithm on set of points to find all lines within that set
 	std::vector<Line> split_and_merge(std::vector<Point> S)
 	{
-		ROS_DEBUG("Running split and merge on set S:");
+		ROS_INFO("Running split and merge on set S:");
 		std::vector<Point> temp_p1, temp_p2, temp_p3;
 		std::vector< std::vector<Point> > points;
 		std::vector<Line> lines;
@@ -248,6 +250,7 @@ public:
 		double threshold = 1e-3;
 		bool split_and_extract = true, merged;
 		points.push_back(S);
+		ros::Rate r(100);
 
 		while (split_and_extract)
 		{
@@ -260,7 +263,7 @@ public:
 				if (line.fitPoints(points[i]) != true)
 				{
 					// Remove singular set and do not fit line to it
-					ROS_DEBUG("Attempted to fit line to single point.");
+					ROS_INFO("Attempted to fit line to single point.");
 					points.erase(points.begin() + i);
 				}
 				else
@@ -277,43 +280,52 @@ public:
 			// if greatest outlier is bigger than threshold distance from line, split set 
 				if (lines[i].R > threshold)
 				{
-					ROS_DEBUG("Splitting set S[%i] by point (%f,%f)",i,lines[i].out_x,lines[i].out_y);
+					ROS_INFO("Splitting set S[%i] of size %lu with xmin,xmax (%f,%f) and ymin, ymax(%f,%f)",i, points[i].size(), lines[i].xmin,lines[i].xmax,lines[i].ymin,lines[i].ymax);
 					split = true;
 					nPts = points[i].size();
 
-				// split into two sets by x-coordinates or y-coodinates
-					if (lines[i].vline)
+				    // split into two sets by x-coordinates or y-coodinates
+					//Points mostly vertical
+					if (lines[i].vline) 
 					{
+						temp_p1.clear();
+						temp_p2.clear();
 						for (int j=0;j<nPts;j++)
 						{
-							if (points[i][j]._y < lines[i].out_y)
+							if (points[i][j]._y <= (lines[i].ymax - lines[i].ymin)/2)
 							{
-								ROS_DEBUG("Adding point (%f,%f) to temp set S1",points[i][j]._x, points[i][j]._y);
+								ROS_INFO("Adding point (%f,%f) to temp set S1",points[i][j]._x, points[i][j]._y);
 								temp_p1.push_back(points[i][j]);
 							}
-							else if (points[i][j]._y > lines[i].out_y)
+							else
 							{
-								ROS_DEBUG("Adding point (%f,%f) to temp set S2",points[i][j]._x, points[i][j]._y);
+								ROS_INFO("Adding point (%f,%f) to temp set S2",points[i][j]._x, points[i][j]._y);
 								temp_p2.push_back(points[i][j]);
 							}
+							r.sleep();
 						}
 					}
+					// split into mostly horizontal
 					else
 					{
+						temp_p1.clear();
+						temp_p2.clear();
 						for (int j=0;j<nPts;j++)
 						{
-							if (points[i][j]._x < lines[i].out_x)
+							if (points[i][j]._x <= (lines[i].xmax - lines[i].xmin)/2)
 							{
-								ROS_DEBUG("Adding point (%f,%f) to set S1",points[i][j]._y, points[i][j]._x);
+								ROS_INFO("Adding point (%f,%f) to set S1",points[i][j]._y, points[i][j]._x);
 								temp_p1.push_back(points[i][j]);
 							}
-							else if (points[i][j]._x > lines[i].out_x)
+							else 
 							{
-								ROS_DEBUG("Adding point (%f,%f) to set S2",points[i][j]._y, points[i][j]._x);
+								ROS_INFO("Adding point (%f,%f) to set S2",points[i][j]._y, points[i][j]._x);
 								temp_p2.push_back(points[i][j]);
 							}
+							r.sleep();
 						}
-					}
+					} 
+
 				// After splitting into two sets, re-run split_and_extract on all sets of points
 					points.erase(points.begin() + i);
 
@@ -321,23 +333,16 @@ public:
 					if (temp_p1.size() > 1)
 					{
 						points.push_back(temp_p1);
+						ROS_INFO("Using temp set S1 with size %lu",temp_p1.size());
 					} 
-					else
-					{
-						ROS_DEBUG("Reducing set by 1 point");
-					}
 
 					if (temp_p2.size() > 1)
 					{
 						points.push_back(temp_p2);
+						ROS_INFO("Using temp set S2 with size %lu",temp_p2.size());
 					} 
-					else
-					{
-						ROS_DEBUG("Reducing set by 1 point");
-					}
-						
 
-					ROS_DEBUG("Split into two sets of size S1:%lu, S2:%lu",temp_p1.size(),temp_p2.size());
+					
 					temp_p1.clear();
 					temp_p2.clear();
 				}
@@ -365,7 +370,7 @@ public:
 			// if co-linear check fit, otherwise change nothing
 				if(lines[i]._slope-lines[j]._slope < 1e-2 || lines[i].vline && lines[j].vline)
 				{
-					ROS_DEBUG("Checking if co-linear lines can be merged");
+					ROS_INFO("Checking if co-linear lines can be merged");
 					temp_p3.clear();
 				// First add all points into temp set 3
 					for(int k=0;k<points[i].size();k++)
@@ -383,7 +388,7 @@ public:
 					// if line works remove old lines and sets of points, add new line and set
 						if(line.R < threshold)
 						{
-							ROS_DEBUG("From set of %lu lines, merging lines %i and %i.",lines.size(),i,j);
+							ROS_INFO("From set of %lu lines, merging lines %i and %i.",lines.size(),i,j);
 							lines.erase(lines.begin() + i);
 							points.erase(points.begin() + i);
 							lines.erase(lines.begin() + j-1);
@@ -423,7 +428,7 @@ int main (int argc, char** argv)
 	// while (ros::ok())
 	// {
 	// 	//libusb_handle_events_timeout(...); // Handle USB events
-	// 	ROS_DEBUG("Spinning...");
+	// 	ROS_INFO("Spinning...");
 	// 	ros::spinOnce();                   // Handle ROS events
 	// 	r.sleep();
 	// }
