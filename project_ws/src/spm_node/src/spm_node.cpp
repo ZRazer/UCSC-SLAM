@@ -1,8 +1,7 @@
-// Example code @ http://wiki.ros.org/pcl/Tutorials
-
 #include <ros/ros.h>
 #include <ros/console.h>
 #include <visualization_msgs/Marker.h>
+#include <visualization_msgs/MarkerArray.h>
 // PCL specific includes
 #include <sensor_msgs/PointCloud2.h>
 #include <pcl_conversions/pcl_conversions.h>
@@ -11,6 +10,8 @@
 #include <pcl/filters/voxel_grid.h>
 #include <vector>
 #include <cmath>
+
+#define PI 3.14159265
 
 struct Point
 {
@@ -25,6 +26,7 @@ struct Point
 struct Line 
 {
 	double _slope, _yInt, xmin, xmax, xmean, ymean, ymin, ymax, out_x, out_y, R;
+	double radius, angle;
 	bool vline;
 	double getYforX(double x) {
 		if(vline)
@@ -40,6 +42,7 @@ struct Line
 	bool fitPoints(std::vector<Point> & points) 
 	{
 		int nPoints = points.size();
+
 		if( nPoints < 2 ) 
 		{
         // Infinite lines fit a single point 
@@ -91,8 +94,10 @@ struct Line
 					out_y = points[i]._y; 
 				}
 			}
+			angle = PI/2;
+			radius = (ymax - ymin)/2;
 			R = temp;
-			ROS_INFO("Found line: x = %f , R val: %f ", xmean,R);
+			ROS_INFO("Found line: x = %f , R val: %f , angle: %f, radius: %f", xmean,R,angle,radius);
 		}
 		else 
 		{
@@ -111,8 +116,11 @@ struct Line
 					out_y = points[i]._y;
 				}
 			}
+			angle = atan(_slope);
+			radius = sqrt(pow((xmax-xmin),2) + pow((ymax-ymin),2))/2;
+
 			R = temp;
-			ROS_INFO("Found line: y = %fx + %f , R val: %f ", _slope,_yInt,R);
+			ROS_INFO("Found line: y = %fx + %f , R val: %f , angle: %f, radius: %f", _slope,_yInt,R,angle,radius);
 		}
 		return true;
 	}
@@ -127,8 +135,9 @@ public:
 		sub = nh.subscribe ("/cloud_data", 100, &cloud_parse::cloud_cb, this);
 
   // Create a ROS publisher for the extracted lines
-		marker_pub = nh.advertise<visualization_msgs::Marker>("/visualization_marker", 10);
+		marker_pub = nh.advertise<visualization_msgs::MarkerArray>("/visualization_marker_array", 10);
 		ROS_INFO("Initialized cloud_parse object...");
+		maxLines = 0;
 	}
 
   // Callback function upon recieving point cloud
@@ -175,8 +184,8 @@ public:
 				temp._x = msg_.points[i].x;
 				temp._y = msg_.points[i].y;
 				points.push_back(temp);
-				ROS_INFO("Adding point (%f,%f) to set S. ",temp._x,temp._y);
-				r.sleep();
+				// ROS_INFO("Adding point (%f,%f) to set S. ",temp._x,temp._y);
+				// r.sleep();
 			}
 		}
 
@@ -184,16 +193,15 @@ public:
 		lines = split_and_merge(points);
 
 	// Publish and display lines
+		visualization_msgs::MarkerArray line_strip_array;
 		visualization_msgs::Marker line_strip;
 		line_strip.header.frame_id = "/velodyne";
-		line_strip.header.stamp = ros::Time::now();
 		line_strip.ns = "lines";
 		line_strip.action = visualization_msgs::Marker::ADD;
 		line_strip.pose.orientation.w = 1.0;
-		line_strip.id = 0;
 		line_strip.type = visualization_msgs::Marker::LINE_STRIP;
 
-    // LINE_STRIP/LINE_LIST markers use only the x component of scale, for the line width
+    // LINE_STRIP/LINE_strip markers use only the x component of scale, for the line width
 		line_strip.scale.x = 0.3;
 
     // Line strip is blue
@@ -202,41 +210,74 @@ public:
 
     // Create the vertices for the points and lines
 		int nLines = lines.size();
-		ROS_INFO("Publishing %i lines.", nLines);
+		if (nLines > maxLines)
+		{
+			maxLines = nLines;
+		}
+
 		double x,y;
 		for (int i=0;i<nLines;i++)
 		{
-			if (lines[i].vline)
-			{
-				for (y = lines[i].ymin; y < lines[i].ymax;y+=(lines[i].ymax-lines[i].ymin)/25)
-				{
+			// if (lines[i].vline)
+			// {
+			// 	for (y = lines[i].ymin; y < lines[i].ymax;y+=(lines[i].ymax-lines[i].ymin)/5)
+			// 	{
 					
-					geometry_msgs::Point p;
-					p.x = lines[i].xmean;;
-					p.y = y;
-					p.z = 0.5;
+			// 		geometry_msgs::Point p;
+			// 		p.x = lines[i].xmean;;
+			// 		p.y = y;
+			// 		p.z = 0.5;
 
-					line_strip.points.push_back(p);
-				}
-			}
-			else
+			// 		line_strip.points.push_back(p);
+			// 	}
+			// }
+			// else
+			// {
+			// 	for (x = lines[i].xmin; x < lines[i].xmax;x+=(lines[i].xmax-lines[i].xmin)/5)
+			// 	{
+			// 		y = lines[i].getYforX(x);
+
+			// 		geometry_msgs::Point p;
+			// 		p.x = x;
+			// 		p.y = y;
+			// 		p.z = 0.5;
+
+			// 		line_strip.points.push_back(p);
+			// 	}
+			// }
+
+			// Get midpoint of line
+			x = (lines[i].xmax + lines[i].xmin) / 2;
+			y = (lines[i].ymax + lines[i].ymin) / 2;
+
+			// Create points vector for visualization
+			for(double r = -lines[i].radius; r < lines[i].radius;r+=lines[i].radius/20)
 			{
-				for (x = lines[i].xmin; x < lines[i].xmax;x+=(lines[i].xmax-lines[i].xmin)/25)
-				{
-					y = lines[i].getYforX(x);
+				geometry_msgs::Point p;
+				p.x = x + r*cos(lines[i].angle);
+				p.y = y + r*sin(lines[i].angle);
+				p.z = 0.5;
 
-					geometry_msgs::Point p;
-					p.x = x;
-					p.y = y;
-					p.z = 0.5;
-
-					line_strip.points.push_back(p);
-				}
+				line_strip.points.push_back(p);
 			}
+			line_strip.id = i;
+			line_strip.header.stamp = ros::Time::now();
+			line_strip_array.markers.push_back(line_strip);
+			line_strip.points.clear();
 		}
-		marker_pub.publish(line_strip);
-		line_strip.points.clear();
+
+		for (int i=nLines;i<maxLines;i++)
+		{
+			line_strip.id = i;
+			line_strip.header.stamp = ros::Time::now();
+			line_strip_array.markers.push_back(line_strip);
+		}
+
+		ROS_INFO("Publishing %lu lines.", line_strip_array.markers.size());
+		marker_pub.publish(line_strip_array);
+		line_strip_array.markers.clear();
 	}
+	
 
 	// Function runs split and merge algorithm on set of points to find all lines within that set
 	std::vector<Line> split_and_merge(std::vector<Point> S)
@@ -247,7 +288,7 @@ public:
 		std::vector<Line> lines;
 		Line line;
 		int nSets, nPts;
-		double threshold = 1e-3;
+		double split_threshold = 1e-3, merge_threshold = 1e-1;
 		bool split_and_extract = true, merged;
 		points.push_back(S);
 		ros::Rate r(100);
@@ -278,7 +319,7 @@ public:
 			for (int i=0;i<nSets;i++)
 			{
 			// if greatest outlier is bigger than threshold distance from line, split set 
-				if (lines[i].R > threshold)
+				if (lines[i].R > split_threshold)
 				{
 					ROS_INFO("Splitting set S[%i] of size %lu with xmin,xmax (%f,%f) and ymin, ymax(%f,%f)",i, points[i].size(), lines[i].xmin,lines[i].xmax,lines[i].ymin,lines[i].ymax);
 					split = true;
@@ -292,7 +333,7 @@ public:
 						temp_p2.clear();
 						for (int j=0;j<nPts;j++)
 						{
-							if (points[i][j]._y <= (lines[i].ymax - lines[i].ymin)/2)
+							if (points[i][j]._y <= (lines[i].ymax + lines[i].ymin)/2)
 							{
 								ROS_INFO("Adding point (%f,%f) to temp set S1",points[i][j]._x, points[i][j]._y);
 								temp_p1.push_back(points[i][j]);
@@ -302,7 +343,7 @@ public:
 								ROS_INFO("Adding point (%f,%f) to temp set S2",points[i][j]._x, points[i][j]._y);
 								temp_p2.push_back(points[i][j]);
 							}
-							r.sleep();
+							// r.sleep();
 						}
 					}
 					// split into mostly horizontal
@@ -312,17 +353,17 @@ public:
 						temp_p2.clear();
 						for (int j=0;j<nPts;j++)
 						{
-							if (points[i][j]._x <= (lines[i].xmax - lines[i].xmin)/2)
+							if (points[i][j]._x <= (lines[i].xmax + lines[i].xmin)/2)
 							{
-								ROS_INFO("Adding point (%f,%f) to set S1",points[i][j]._y, points[i][j]._x);
+								ROS_INFO("Adding point (%f,%f) to set S1",points[i][j]._x, points[i][j]._y);
 								temp_p1.push_back(points[i][j]);
 							}
 							else 
 							{
-								ROS_INFO("Adding point (%f,%f) to set S2",points[i][j]._y, points[i][j]._x);
+								ROS_INFO("Adding point (%f,%f) to set S2",points[i][j]._x, points[i][j]._y);
 								temp_p2.push_back(points[i][j]);
 							}
-							r.sleep();
+							// r.sleep();
 						}
 					} 
 
@@ -345,6 +386,7 @@ public:
 					
 					temp_p1.clear();
 					temp_p2.clear();
+					break;
 				}
 			}
 
@@ -368,7 +410,7 @@ public:
 					break;
 				}
 			// if co-linear check fit, otherwise change nothing
-				if(lines[i]._slope-lines[j]._slope < 1e-2 || lines[i].vline && lines[j].vline)
+				if(std::fabs(lines[i]._slope-lines[j]._slope) < 1e-1 || lines[i].vline && lines[j].vline)
 				{
 					ROS_INFO("Checking if co-linear lines can be merged");
 					temp_p3.clear();
@@ -386,13 +428,13 @@ public:
 					if (line.fitPoints(temp_p3) == true)
 					{
 					// if line works remove old lines and sets of points, add new line and set
-						if(line.R < threshold)
+						if(line.R < merge_threshold)
 						{
 							ROS_INFO("From set of %lu lines, merging lines %i and %i.",lines.size(),i,j);
 							lines.erase(lines.begin() + i);
 							points.erase(points.begin() + i);
-							lines.erase(lines.begin() + j-1);
-							points.erase(points.begin() + j-1);
+							lines.erase(lines.begin() + (j-1));
+							points.erase(points.begin() + (j-1));
 							points.push_back(temp_p3);
 							lines.push_back(line);
 							merged = true;
@@ -411,6 +453,7 @@ private:
 	ros::Publisher marker_pub;
 	ros::Subscriber sub;
 	ros::NodeHandle nh; 
+	int maxLines;
 
 };//End of class cloud_cb_pub
 
@@ -422,16 +465,6 @@ int main (int argc, char** argv)
 
 	// Spinning handles ROS events
 	ros::spin();
-
-	
-	// ros::Rate r(100);
-	// while (ros::ok())
-	// {
-	// 	//libusb_handle_events_timeout(...); // Handle USB events
-	// 	ROS_INFO("Spinning...");
-	// 	ros::spinOnce();                   // Handle ROS events
-	// 	r.sleep();
-	// }
 	
 	return 0;
 }
