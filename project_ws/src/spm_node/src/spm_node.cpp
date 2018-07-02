@@ -15,7 +15,7 @@
 
 #define PI 3.14159265
 // define RVIZ for rviz visualization of features, otherwise normal operation with slam
-//#define RVIZ 
+#define RVIZ 
 
 struct Point
 {
@@ -188,13 +188,13 @@ public:
 		pcl::fromROSMsg(output,msg_);
 
 	// Set ground reference point
-		float ground = 0.3;
+		float ground = 0.18;
 
 	// Filter points by z-coord and add to points vector
 		int nPoints = msg_.points.size();
 		for(int i=0; i<nPoints; i++) 
 		{
-			if(msg_.points[i].z >= ground)
+			if(msg_.points[i].z >= ground && msg_.points[i].z <= ground + 0.1)
 			{ 
 				temp._x = msg_.points[i].x;
 				temp._y = msg_.points[i].y;
@@ -247,7 +247,7 @@ public:
 					geometry_msgs::Point p;
 					p.x = x + r*cos(lines[i].angle);
 					p.y = y + r*sin(lines[i].angle);
-					p.z = 0.5;
+					p.z = ground;
  
 					line_strip.points.push_back(p);
 				}
@@ -287,6 +287,7 @@ public:
 			landmarks.landmarks.push_back(landmark);
 		}
 		marker_pub.publish(landmarks);
+		landmarks.landmarks.clear();
 #endif 
 	}
 	

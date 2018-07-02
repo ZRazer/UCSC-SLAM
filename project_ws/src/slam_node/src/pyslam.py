@@ -36,6 +36,11 @@ if sys.version_info[0] < 3:
 else:
     import queue
 
+am_debugging = False
+
+def debug_print(inp_str):
+    if am_debugging:
+        print(inp_str)
 class StdOutListener():
     def __init__(self, num):
         self.fig = Figure(figsize=(5, 5), dpi=100)
@@ -121,7 +126,7 @@ def _readline(self):
     return bytes(line)
 
 #def on_key_event(event):
-#    print('you pressed %s' % event.key)
+#    debug_print('you pressed %s' % event.key)
 #    key_press_handler(event, canvas, toolbar)
 
 # Basic test method for adding random data to the plots
@@ -253,16 +258,16 @@ class SLAM():
     def __init__(self, q):
         # Initialized state vector, covariance, etc 
         self.poseInit = False 
-        self.r_t = 1                                    # Threshold for assosciation
-        self.v_r = 0.1                                  # Measurement error ratio
-        self.v_b = 0.0005
+        self.r_t = 0.05                                    # Threshold for assosciation
+        self.v_r = 0.05                                  # Measurement error ratio
+        self.v_b = 0.005
         self.x = None
         self.P = np.array([[0.1,0,0],[0,0.1,0],[0,0,np.pi/4]]) # Covariance matrix
 
         # Process noise intensity matrix 
-        self.Gamma = np.array([[15, 1],
-            [15, 1],
-            [  0, 0.1]])
+        self.Gamma = np.array([[0.05, 0.005],
+            [0.05, 0.005],
+            [  0, 0.001]])
         self.dX = None
         self.dY = None
         self.dT = None
@@ -271,7 +276,7 @@ class SLAM():
         self.data = {}
 
     def odom_update(self,dx,dy,dt):
-        print('Running odometry update')
+        debug_print('Running odometry update')
         self.dT = dt
         self.dX = dx
         self.dY = dy
@@ -303,8 +308,8 @@ class SLAM():
 
     def landmark_update(self, data):
         landmarks = data.landmarks
-        print('Running update with landmarks: ' + str(landmarks))
-        print('Prior: ' + str(self.x[0:3]))
+        debug_print('Running update with landmarks: ' + str(landmarks))
+        debug_print('Prior: ' + str(self.x[0:3]))
         Phi = np.array([[1, 0, -self.dY],
             [0, 1, self.dX],
             [0, 0, 1]])
@@ -313,16 +318,17 @@ class SLAM():
             r = self.r_t
             # Find landmark using observation model
             num_landmarks = int((len(self.x)-3)/2)
-            A = np.matrix([[np.cos(self.x[2,0]), -np.sin(self.x[2,0]), self.x[0,0]],
-                [np.sin(self.x[2,0]),  np.cos(self.x[2,0]), self.x[1,0]],
-                [0                ,  0                , 1]])
-            m_x = landmark.x
-            m_y = landmark.y
+            # A = np.matrix([[np.cos(self.x[2,0]), -np.sin(self.x[2,0]), self.x[0,0]],
+            #     [np.sin(self.x[2,0]),  np.cos(self.x[2,0]), self.x[1,0]],
+            #     [0                ,  0                , 1]])
+            # m_x = landmark.x
+            # m_y = landmark.y
 
-            lm = np.array([m_x,m_y,1])
-            meas_landmark = np.matmul(A,lm)
-            meas_landmark = np.delete(meas_landmark,[2,2])
-            print('Observed landmark: ' + str(meas_landmark) + ' (mx,my): (' + str(m_x) + ',' + str(m_y) + ')')
+            # lm = np.array([m_x,m_y,1])
+            # meas_landmark = np.matmul(A,lm)
+            # meas_landmark = np.delete(meas_landmark,[2,2])
+            meas_landmark = np.array([[landmark.x,landmark.y]])
+            debug_print('Observed landmark: ' + str(meas_landmark))
 
             # Calculate depth and noise for observed landmark
             meas_range = np.sqrt(np.square(meas_landmark[0,0]-self.x[0,0])+np.square(meas_landmark[0,1]-self.x[1,0]))
@@ -336,7 +342,7 @@ class SLAM():
             for i in range(num_landmarks):
                 # construct transformation matrix (with rotation and translation)
                 pred_landmark = np.array([self.x[3+2*(i),0],self.x[4+2*(i),0]])
-                print('Recorded landmark '+ str(i) + ' ' + str(pred_landmark))
+                debug_print('Recorded landmark '+ str(i) + ' ' + str(pred_landmark))
                 # Calculate depth and noise for observed landmark
                 pred_range = np.sqrt(np.square(pred_landmark[0]-self.x[0,0])+np.square(pred_landmark[1]-self.x[1,0]))
                 pred_bearing = np.arctan((pred_landmark[1]-self.x[1,0])/(pred_landmark[0]-self.x[0,0])) - self.x[2,0]
@@ -364,12 +370,12 @@ class SLAM():
                 residuals = np.absolute(residuals)
                 ind = np.unravel_index(np.argmin(residuals, axis=None), residuals.shape)
                 r = residuals[ind]
-                print('Residuals: ' + str(residuals))
+                debug_print('Residuals: ' + str(residuals))
                     
             # If no known correspondance, add landmark to state vector
             if r >= self.r_t:
                 self.x = np.concatenate((self.x,[[meas_landmark[0,0]],[meas_landmark[0,1]]]),axis=0)
-                print('Landmark appended to state vector, new state vector: ' + str(self.x))
+                debug_print('Landmark appended to state vector, new state vector: ' + str(self.x))
                 Jz = np.array([[np.cos(self.x[2,0]+self.dT), -self.dY],[np.sin(self.x[2,0]+self.dT), self.dX]])
                 C = np.matmul(Phi[0:2,0:3],np.matmul(self.P[0:3,0:3],np.transpose(Phi[0:2,0:3]))) + np.matmul(Jz,np.matmul(R,np.transpose(Jz))) # Jxr*P*Jxr^T + R (iden)
                 G = np.matmul(self.P[0:3,0:3],np.transpose(Phi[0:2,0:3]))                                 # P*Jxr^T
@@ -388,7 +394,7 @@ class SLAM():
                 # predicted landmark found from ML estimator
                 # construct transformation matrix (with rotation and translation)
                 pred_landmark = np.array([self.x[3+2*(ind[0]),0],self.x[4+2*(ind[0]),0]])
-                print('Recorded landmark '+ str(ind[0]) + ' ' + str(pred_landmark))
+                debug_print('Recorded landmark '+ str(ind[0]) + ' ' + str(pred_landmark))
                 # Calculate depth and noise for observed landmark
                 pred_range = np.sqrt(np.square(pred_landmark[0]-self.x[0,0])+np.square(pred_landmark[1]-self.x[1,0]))
                 pred_bearing = np.arctan((pred_landmark[1]-self.x[1,0])/(pred_landmark[0]-self.x[0,0])) - self.x[2,0]
@@ -414,11 +420,11 @@ class SLAM():
                 # Use kalman gain to generate estimate and update covariance
                 err = pred-meas
                 err[1] = wrap_to_pi(err[1])
-                print('Error: ' + str(err))
-                print('Gain: ' + str(K)) 
+                debug_print('Error: ' + str(err))
+                debug_print('Gain: ' + str(K)) 
                 self.x = np.add(self.x, np.matmul(K,err)) # x = x + K*(y-h(x))
                 self.x[2,0] = wrap_to_pi(self.x[2,0])
-                print('Update: ' + str(self.x))
+                debug_print('Update: ' + str(self.x))
                 self.P = np.matmul(np.subtract(np.eye(len(self.x)),np.matmul(K,H)),self.P) # (I-K*H)*P 
             self.data['state'] = self.x
             self.data['lm_info'] = self.landmarks
@@ -432,29 +438,47 @@ class slam_node():
         self.slam_obj = SLAM(self.q)
         tk_proc = TkGUI(self.q)
         tk_proc.start()
+        # Lock for callback threads
+        self.lock = False
+        # For keeping track of time delta 
+        self.t1 = None
+        self.t2 = None
 
     # Callback upon reciving new landmarks, updating state estimate
     def lm_callback(self, data):
         # if pose is unitialized, wait for initialization and let these landmarks be consumed
+        while(self.lock):
+            time.sleep(.1)
+
+        self.lock = True
         if self.slam_obj.poseInit:
             self.slam_obj.landmark_update(data)
+        self.lock = False
 
     # Use odometry and prediction model to update state  
     def odom_callback(self, data):
-        # if pose is unitialized, initialize it with first data 
+        # if pose is unitialized, initialize it with first data
+        while(self.lock):
+            time.sleep(.1)
+        self.lock = True 
         if self.slam_obj.poseInit:
-            dx = data.twist.twist.linear.x
-            dy = data.twist.twist.linear.y
-            dt = data.twist.twist.angular.z
+            self.t2 = data.header.stamp.secs
+            time_delta = self.t2 - self.t1
+            dx = time_delta*data.twist.twist.linear.x
+            dy = time_delta*data.twist.twist.linear.y
+            dt = time_delta*data.twist.twist.angular.x
             self.slam_obj.odom_update(dx,dy,dt)
+            self.t1 = self.t2
         else:
+            self.t1 = data.header.stamp.secs
             self.slam_obj.x = np.array([[data.pose.pose.position.x],
                                         [data.pose.pose.position.y],
-                                        [data.pose.pose.orientation.z]])
-            self.slam_obj.dX = data.twist.twist.linear.x
-            self.slam_obj.dY = data.twist.twist.linear.y
-            self.slam_obj.dT = data.twist.twist.angular.z
+                                        [data.pose.pose.orientation.x]])
+            self.slam_obj.dX = 0
+            self.slam_obj.dY = 0
+            self.slam_obj.dT = 0
             self.slam_obj.poseInit = True
+        self.lock = False
 
 
 
