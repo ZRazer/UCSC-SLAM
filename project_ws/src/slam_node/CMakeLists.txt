@@ -19,7 +19,7 @@ catkin_package(
 )
 
 
-install(PROGRAMS src/slam_node.py src/slam_node.py DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+install(PROGRAMS src/pyslam.py src/pyslam.py DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 
 install(DIRECTORY launch
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}

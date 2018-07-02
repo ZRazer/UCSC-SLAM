@@ -10,8 +10,12 @@
 #include <pcl/filters/voxel_grid.h>
 #include <vector>
 #include <cmath>
+#include <slam_node/landmark.h>
+#include <slam_node/lm_array.h>
 
 #define PI 3.14159265
+// define RVIZ for rviz visualization of features, otherwise normal operation with slam
+//#define RVIZ 
 
 struct Point
 {
@@ -142,7 +146,11 @@ public:
 		sub = nh.subscribe ("/cloud_data", 100, &cloud_parse::cloud_cb, this);
 
   // Create a ROS publisher for the extracted lines
+#ifdef RVIZ
 		marker_pub = nh.advertise<visualization_msgs::MarkerArray>("/visualization_marker_array", 10);
+#else
+		marker_pub = nh.advertise<slam_node::lm_array>("/landmarks",10);
+#endif
 		ROS_DEBUG("Initialized cloud_parse object...");
 		maxLines = 0;
 	}
@@ -200,9 +208,10 @@ public:
 		lines = split_and_merge(points);
 
 	// Publish and display lines
+#ifdef RVIZ
 		visualization_msgs::MarkerArray line_strip_array;
 		visualization_msgs::Marker line_strip;
-		line_strip.header.frame_id = "/velodyne";
+		line_strip.header.frame_id = "/world";
 		line_strip.ns = "lines";
 		line_strip.action = visualization_msgs::Marker::ADD;
 		line_strip.pose.orientation.w = 1.0;
@@ -262,6 +271,23 @@ public:
 		
 		marker_pub.publish(line_strip_array);
 		line_strip_array.markers.clear();
+#else 
+		slam_node::landmark landmark;
+		slam_node::lm_array landmarks;
+		int nLines = lines.size();
+		double x,y;
+		for (int i=0;i<nLines;i++)
+		{
+			x = (lines[i].xmax + lines[i].xmin) / 2;
+		    y = (lines[i].ymax + lines[i].ymin) / 2;
+			landmark.x = x;
+			landmark.y = y;
+			landmark.radius = lines[i].radius; 
+			landmark.angle = lines[i].angle;
+			landmarks.landmarks.push_back(landmark);
+		}
+		marker_pub.publish(landmarks);
+#endif 
 	}
 	
 
