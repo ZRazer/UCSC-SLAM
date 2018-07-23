@@ -4,8 +4,7 @@
 import rospy
 from sensor_msgs.msg import PointCloud2
 from nav_msgs.msg import Odometry
-from simple_slam.msg import landmark
-from simple_slam.msg import lm_array
+from tf2_msgs.msg import TFMessage
 import os
 import io
 import sys
@@ -36,7 +35,7 @@ if sys.version_info[0] < 3:
 else:
     import queue
 
-am_debugging = False
+am_debugging = True
 
 def debug_print(inp_str):
     if am_debugging:
@@ -68,7 +67,7 @@ class StdOutListener():
  
     # On_data adds new y val to a set of values and calculates x value based off time
     # method also plots avg X val over time. For now, plots xmin/ymin to show all data
-    def on_data(self, x, landmarks):
+    def on_data(self, x):
         ax = canvas[self.num].figure.axes[0]
         ax.cla()
         self.sub.set_xlabel('x (m)')
@@ -80,20 +79,13 @@ class StdOutListener():
         # keep track of which landmark we are dealing with
         i = 0
         numLandmarks = int((len(x)-3)/2)
+        self.lx = []
+        self.ly = []
         for j in range(int((len(x)-3)/2)):
-            self.lx = []
-            self.ly = []
-            if numLandmarks == 1:
-                for r in np.arange(-landmarks[0],landmarks[0],landmarks[0]/20):
-                    self.lx.append(x[3+2*(j),0] + r*np.cos(landmarks[1]))
-                    self.ly.append(x[4+2*(j),0] + r*np.sin(landmarks[1]))
-                self.sub.plot(self.lx, self.ly, color='red')
-            elif numLandmarks > 1:
-                for r in np.arange(-landmarks[i,0],landmarks[i,0],landmarks[i,0]/20):
-                    self.lx.append(x[3+2*(j),0] + r*np.cos(landmarks[i,1]))
-                    self.ly.append(x[4+2*(j),0] + r*np.sin(landmarks[i,1]))
-                self.sub.plot(self.lx, self.ly, color='red')
-            i = i + 1
+            self.lx.append(x[3+2*(j),0])
+            self.ly.append(x[4+2*(j),0])
+
+        self.sub.scatter(self.lx, self.ly, color='red')
 
         canvas[self.num].draw()
 
@@ -141,12 +133,11 @@ def updateGraph(out_listener, q, textBoxes):
         try:
             dict_data = q.get(block=False)
         except queue.Empty:
-            root.after(1000, updateGraph, out_listener, q, textBoxes)
+            root.after(10, updateGraph, out_listener, q, textBoxes)
             return
         # This list must be expanded if graphs are added/modified
         data = dict_data['state']
-        landmarks = dict_data['lm_info']
-        out_listener[0].on_data(data,landmarks)
+        out_listener[0].on_data(data)
         textBoxes[0].configure(state = 'normal')
         textBoxes[0].delete('1.0', Tk.END)
         textBoxes[0].insert(Tk.INSERT, "Pose:\nx: " + str(int(data[0,0])) + "\ny: " + str(int(data[1,0])) + "\ntheta: " + str(int(data[2,0]*180/np.pi)))
@@ -155,12 +146,12 @@ def updateGraph(out_listener, q, textBoxes):
         textBoxes[1].delete('1.0', Tk.END)
         textBoxes[1].insert(Tk.INSERT, "Num landmarks:\n" + str(int((len(data)-3)/2)))
         textBoxes[1].configure(state = 'disabled')
-        root.after(1000, updateGraph, out_listener, q, textBoxes)
+        root.after(10, updateGraph, out_listener, q, textBoxes)
         return # Return to prevent extra after() call
     elif start == 2:
         for listener in out_listener:
             listener.on_data(np.random.randint(-5,50))
-    after_id = root.after(250, updateGraph, out_listener, 0, 0)
+    after_id = root.after(10, updateGraph, out_listener, 0, 0)
     if not start:
         if after_id is not None:
             root.after_cancel(after_id)
@@ -272,11 +263,10 @@ class SLAM():
         self.dY = None
         self.dT = None
         self.q = q
-        self.landmarks = None
         self.data = {}
 
     def odom_update(self,dx,dy,dt):
-        debug_print('Running odometry update')
+        debug_print('Running odometry update (x,y,t): (' + str(self.x[0,0]) + ',' + str(self.x[1,0]) + ',' + str(self.x[2,0]) + ')')
         self.dT = dt
         self.dX = dx
         self.dY = dy
@@ -303,136 +293,130 @@ class SLAM():
             self.P[0:3,3:len(self.P)] = temp
             self.P[3:len(self.P),0:3] = np.transpose(temp)
         self.data['state'] = self.x
-        self.data['lm_info'] = self.landmarks
         self.q.put(self.data)
 
     def landmark_update(self, data):
-        landmarks = data.landmarks
-        debug_print('Running update with landmarks: ' + str(landmarks))
+        debug_print('Running landmark update')
         debug_print('Prior: ' + str(self.x[0:3]))
         Phi = np.array([[1, 0, -self.dY],
             [0, 1, self.dX],
             [0, 0, 1]])
         # For every landmark observed, run update or add it to state vector
-        for landmark in landmarks:
-            r = self.r_t
-            # Find landmark using observation model
-            num_landmarks = int((len(self.x)-3)/2)
-            # A = np.matrix([[np.cos(self.x[2,0]), -np.sin(self.x[2,0]), self.x[0,0]],
-            #     [np.sin(self.x[2,0]),  np.cos(self.x[2,0]), self.x[1,0]],
-            #     [0                ,  0                , 1]])
-            # m_x = landmark.x
-            # m_y = landmark.y
+        # In simple case we only observe one landmark at a time
 
-            # lm = np.array([m_x,m_y,1])
-            # meas_landmark = np.matmul(A,lm)
-            # meas_landmark = np.delete(meas_landmark,[2,2])
-            meas_landmark = np.array([[landmark.x,landmark.y]])
-            debug_print('Observed landmark: ' + str(meas_landmark))
+        r = self.r_t
+        # Find landmark using observation model
+        num_landmarks = int((len(self.x)-3)/2)
+        # A = np.matrix([[np.cos(self.x[2,0]), -np.sin(self.x[2,0]), self.x[0,0]],
+        #     [np.sin(self.x[2,0]),  np.cos(self.x[2,0]), self.x[1,0]],
+        #     [0                ,  0                , 1]])
+        # m_x = landmark.x
+        # m_y = landmark.y
 
+        # lm = np.array([m_x,m_y,1])
+        # meas_landmark = np.matmul(A,lm)
+        # meas_landmark = np.delete(meas_landmark,[2,2])
+        meas_landmark = np.array([[self.x[0,0]+np.cos(self.x[2,0])*data.x,self.x[1,0]+np.sin(self.x[2,0])*data.y]])
+        debug_print('Observed landmark: ' + str(meas_landmark))
+
+        # Calculate depth and noise for observed landmark
+        meas_range = np.sqrt(np.square(meas_landmark[0,0]-self.x[0,0])+np.square(meas_landmark[0,1]-self.x[1,0]))
+        meas_bearing = np.arctan((meas_landmark[0,1]-self.x[1,0])/(meas_landmark[0,0]-self.x[0,0])) - self.x[2,0]
+        meas_bearing = wrap_to_pi(meas_bearing)
+        R = np.array([[self.v_r*meas_range , 0],
+            [0,  self.v_b*meas_range]])
+        
+        # Use ML estimator for data assosciation
+        residuals = np.array([])
+        for i in range(num_landmarks):
+            # construct transformation matrix (with rotation and translation)
+            pred_landmark = np.array([self.x[3+2*(i),0],self.x[4+2*(i),0]])
+            debug_print('Recorded landmark '+ str(i) + ' ' + str(pred_landmark))
             # Calculate depth and noise for observed landmark
-            meas_range = np.sqrt(np.square(meas_landmark[0,0]-self.x[0,0])+np.square(meas_landmark[0,1]-self.x[1,0]))
-            meas_bearing = np.arctan((meas_landmark[0,1]-self.x[1,0])/(meas_landmark[0,0]-self.x[0,0])) - self.x[2,0]
-            meas_bearing = wrap_to_pi(meas_bearing)
-            R = np.array([[self.v_r*meas_range , 0],
-                [0,  self.v_b*meas_range]])
-            
-            # Use ML estimator for data assosciation
-            residuals = np.array([])
-            for i in range(num_landmarks):
-                # construct transformation matrix (with rotation and translation)
-                pred_landmark = np.array([self.x[3+2*(i),0],self.x[4+2*(i),0]])
-                debug_print('Recorded landmark '+ str(i) + ' ' + str(pred_landmark))
-                # Calculate depth and noise for observed landmark
-                pred_range = np.sqrt(np.square(pred_landmark[0]-self.x[0,0])+np.square(pred_landmark[1]-self.x[1,0]))
-                pred_bearing = np.arctan((pred_landmark[1]-self.x[1,0])/(pred_landmark[0]-self.x[0,0])) - self.x[2,0]
+            pred_range = np.sqrt(np.square(pred_landmark[0]-self.x[0,0])+np.square(pred_landmark[1]-self.x[1,0]))
+            pred_bearing = np.arctan((pred_landmark[1]-self.x[1,0])/(pred_landmark[0]-self.x[0,0])) - self.x[2,0]
 
-                # Construct H matrix rows, append 0s and 1s depending on which landmark is considered, then stack rows
-                hr1 = np.array([(self.x[0,0]-pred_landmark[0])/pred_range, (self.x[1,0]-pred_landmark[1])/pred_range, 0])
-                hr2 = np.array([(pred_landmark[1]-self.x[1,0])/np.square(pred_range), (pred_landmark[0]-self.x[0,0])/np.square(pred_range), -1])
-                for val in range(num_landmarks):
-                    if val == i:
-                        hr1 = np.append(hr1,[-(self.x[0,0]-pred_landmark[0])/pred_range, -(self.x[1,0]-pred_landmark[1])/pred_range])
-                        hr2 = np.append(hr2,[-(pred_landmark[1]-self.x[1,0])/np.square(pred_range), -(pred_landmark[0]-self.x[0,0])/np.square(pred_range)])
-                    else:
-                        hr1 = np.append(hr1,[0, 0])
-                        hr2 = np.append(hr2,[0, 0])
-                H = np.vstack((hr1,hr2))
-                Kappa = np.matmul(H,np.matmul(self.P,np.transpose(H))) + R
-                #residuals = np.append(residuals,np.matmul((meas_landmark-pred_landmark),np.matmul(inv(Kappa),np.transpose(meas_landmark-pred_landmark))))
-                rsD = 0.5*np.sqrt(np.matmul((meas_landmark-pred_landmark),np.transpose(meas_landmark-pred_landmark)))
-                residuals = np.append(residuals, rsD)
-
-                # Find ML estimate of which landmark is being observed
-
-            if len(residuals) > 0:
-                residuals = np.asarray(residuals)
-                residuals = np.absolute(residuals)
-                ind = np.unravel_index(np.argmin(residuals, axis=None), residuals.shape)
-                r = residuals[ind]
-                debug_print('Residuals: ' + str(residuals))
-                    
-            # If no known correspondance, add landmark to state vector
-            if r >= self.r_t:
-                self.x = np.concatenate((self.x,[[meas_landmark[0,0]],[meas_landmark[0,1]]]),axis=0)
-                debug_print('Landmark appended to state vector, new state vector: ' + str(self.x))
-                Jz = np.array([[np.cos(self.x[2,0]+self.dT), -self.dY],[np.sin(self.x[2,0]+self.dT), self.dX]])
-                C = np.matmul(Phi[0:2,0:3],np.matmul(self.P[0:3,0:3],np.transpose(Phi[0:2,0:3]))) + np.matmul(Jz,np.matmul(R,np.transpose(Jz))) # Jxr*P*Jxr^T + R (iden)
-                G = np.matmul(self.P[0:3,0:3],np.transpose(Phi[0:2,0:3]))                                 # P*Jxr^T
-                if num_landmarks > 0:
-                    G = np.concatenate((G,np.zeros((int(2*num_landmarks),2))),axis=0)
-                M1 = np.concatenate((np.transpose(G),C),axis=1)
-                M2 = np.concatenate((self.P,G),axis=1)
-                self.P = np.concatenate((M2,M1),axis=0)                                             # New Cov Matrix
-
-                if num_landmarks == 0:
-                    self.landmarks = np.array([landmark.radius, landmark.angle])
+            # Construct H matrix rows, append 0s and 1s depending on which landmark is considered, then stack rows
+            hr1 = np.array([(self.x[0,0]-pred_landmark[0])/pred_range, (self.x[1,0]-pred_landmark[1])/pred_range, 0])
+            hr2 = np.array([(pred_landmark[1]-self.x[1,0])/np.square(pred_range), (pred_landmark[0]-self.x[0,0])/np.square(pred_range), -1])
+            for val in range(num_landmarks):
+                if val == i:
+                    hr1 = np.append(hr1,[-(self.x[0,0]-pred_landmark[0])/pred_range, -(self.x[1,0]-pred_landmark[1])/pred_range])
+                    hr2 = np.append(hr2,[-(pred_landmark[1]-self.x[1,0])/np.square(pred_range), -(pred_landmark[0]-self.x[0,0])/np.square(pred_range)])
                 else:
-                    self.landmarks = np.vstack((self.landmarks, np.array([landmark.radius, landmark.angle])))
-                # If known correspondance, we run an update from that landmark    
-            else: 
-                # predicted landmark found from ML estimator
-                # construct transformation matrix (with rotation and translation)
-                pred_landmark = np.array([self.x[3+2*(ind[0]),0],self.x[4+2*(ind[0]),0]])
-                debug_print('Recorded landmark '+ str(ind[0]) + ' ' + str(pred_landmark))
-                # Calculate depth and noise for observed landmark
-                pred_range = np.sqrt(np.square(pred_landmark[0]-self.x[0,0])+np.square(pred_landmark[1]-self.x[1,0]))
-                pred_bearing = np.arctan((pred_landmark[1]-self.x[1,0])/(pred_landmark[0]-self.x[0,0])) - self.x[2,0]
-                pred_bearing = wrap_to_pi(pred_bearing)
-                pred = np.array([[pred_range], [pred_bearing]])
-                meas = np.array([[meas_range], [meas_bearing]])
+                    hr1 = np.append(hr1,[0, 0])
+                    hr2 = np.append(hr2,[0, 0])
+            H = np.vstack((hr1,hr2))
+            Kappa = np.matmul(H,np.matmul(self.P,np.transpose(H))) + R
+            #residuals = np.append(residuals,np.matmul((meas_landmark-pred_landmark),np.matmul(inv(Kappa),np.transpose(meas_landmark-pred_landmark))))
+            rsD = 0.5*np.sqrt(np.matmul((meas_landmark-pred_landmark),np.transpose(meas_landmark-pred_landmark)))
+            residuals = np.append(residuals, rsD)
 
-                # Construct H matrix rows, append 0s and 1s depending on which landmark is considered, then stack rows
-                hr1 = np.array([(self.x[0,0]-pred_landmark[0])/pred_range, (self.x[1,0]-pred_landmark[1])/pred_range, 0])
-                hr2 = np.array([(pred_landmark[1]-self.x[1,0])/np.square(pred_range), (pred_landmark[0]-self.x[0,0])/np.square(pred_range), -1])
-                for val in range(num_landmarks):
-                    if val == i:
-                        hr1 = np.append(hr1,[-(self.x[0,0]-pred_landmark[0])/pred_range, -(self.x[1,0]-pred_landmark[1])/pred_range])
-                        hr2 = np.append(hr2,[-(pred_landmark[1]-self.x[1,0])/np.square(pred_range), -(pred_landmark[0]-self.x[0,0])/np.square(pred_range)])
-                    else:
-                        hr1 = np.append(hr1,[0, 0])
-                        hr2 = np.append(hr2,[0, 0])
-                H = np.vstack((hr1,hr2))
-                # compute kalman gain
-                K1 = np.matmul(H,np.matmul(self.P,np.transpose(H)))  # H*P*H^T
-                K2 = np.matmul(self.P,np.transpose(H))               # P*H^T
-                K = np.matmul(K2,inv(np.add(K1,R)))                     # P*H^T(H*P*H^T + R)^-1
-                # Use kalman gain to generate estimate and update covariance
-                err = pred-meas
-                err[1] = wrap_to_pi(err[1])
-                debug_print('Error: ' + str(err))
-                debug_print('Gain: ' + str(K)) 
-                self.x = np.add(self.x, np.matmul(K,err)) # x = x + K*(y-h(x))
-                self.x[2,0] = wrap_to_pi(self.x[2,0])
-                debug_print('Update: ' + str(self.x))
-                self.P = np.matmul(np.subtract(np.eye(len(self.x)),np.matmul(K,H)),self.P) # (I-K*H)*P 
-            self.data['state'] = self.x
-            self.data['lm_info'] = self.landmarks
-            #self.q.put(self.data)
+            # Find ML estimate of which landmark is being observed
+
+        if len(residuals) > 0:
+            residuals = np.asarray(residuals)
+            residuals = np.absolute(residuals)
+            ind = np.unravel_index(np.argmin(residuals, axis=None), residuals.shape)
+            r = residuals[ind]
+            debug_print('Residuals: ' + str(residuals))
+                
+        # If no known correspondance, add landmark to state vector
+        if r >= self.r_t:
+            self.x = np.concatenate((self.x,[[meas_landmark[0,0]],[meas_landmark[0,1]]]),axis=0)
+            debug_print('Landmark appended to state vector, new state vector: ' + str(self.x))
+            Jz = np.array([[np.cos(self.x[2,0]+self.dT), -self.dY],[np.sin(self.x[2,0]+self.dT), self.dX]])
+            C = np.matmul(Phi[0:2,0:3],np.matmul(self.P[0:3,0:3],np.transpose(Phi[0:2,0:3]))) + np.matmul(Jz,np.matmul(R,np.transpose(Jz))) # Jxr*P*Jxr^T + R (iden)
+            G = np.matmul(self.P[0:3,0:3],np.transpose(Phi[0:2,0:3]))                                 # P*Jxr^T
+            if num_landmarks > 0:
+                G = np.concatenate((G,np.zeros((int(2*num_landmarks),2))),axis=0)
+            M1 = np.concatenate((np.transpose(G),C),axis=1)
+            M2 = np.concatenate((self.P,G),axis=1)
+            self.P = np.concatenate((M2,M1),axis=0)                                             # New Cov Matrix
+
+            # If known correspondance, we run an update from that landmark    
+        else: 
+            # predicted landmark found from ML estimator
+            # construct transformation matrix (with rotation and translation)
+            pred_landmark = np.array([self.x[3+2*(ind[0]),0],self.x[4+2*(ind[0]),0]])
+            debug_print('Recorded landmark '+ str(ind[0]) + ' ' + str(pred_landmark))
+            # Calculate depth and noise for observed landmark
+            pred_range = np.sqrt(np.square(pred_landmark[0]-self.x[0,0])+np.square(pred_landmark[1]-self.x[1,0]))
+            pred_bearing = np.arctan((pred_landmark[1]-self.x[1,0])/(pred_landmark[0]-self.x[0,0])) - self.x[2,0]
+            pred_bearing = wrap_to_pi(pred_bearing)
+            pred = np.array([[pred_range], [pred_bearing]])
+            meas = np.array([[meas_range], [meas_bearing]])
+
+            # Construct H matrix rows, append 0s and 1s depending on which landmark is considered, then stack rows
+            hr1 = np.array([(self.x[0,0]-pred_landmark[0])/pred_range, (self.x[1,0]-pred_landmark[1])/pred_range, 0])
+            hr2 = np.array([(pred_landmark[1]-self.x[1,0])/np.square(pred_range), (pred_landmark[0]-self.x[0,0])/np.square(pred_range), -1])
+            for val in range(num_landmarks):
+                if val == i:
+                    hr1 = np.append(hr1,[-(self.x[0,0]-pred_landmark[0])/pred_range, -(self.x[1,0]-pred_landmark[1])/pred_range])
+                    hr2 = np.append(hr2,[-(pred_landmark[1]-self.x[1,0])/np.square(pred_range), -(pred_landmark[0]-self.x[0,0])/np.square(pred_range)])
+                else:
+                    hr1 = np.append(hr1,[0, 0])
+                    hr2 = np.append(hr2,[0, 0])
+            H = np.vstack((hr1,hr2))
+            # compute kalman gain
+            K1 = np.matmul(H,np.matmul(self.P,np.transpose(H)))  # H*P*H^T
+            K2 = np.matmul(self.P,np.transpose(H))               # P*H^T
+            K = np.matmul(K2,inv(np.add(K1,R)))                     # P*H^T(H*P*H^T + R)^-1
+            # Use kalman gain to generate estimate and update covariance
+            err = pred-meas
+            err[1] = wrap_to_pi(err[1])
+            debug_print('Error: ' + str(err))
+            debug_print('Gain: ' + str(K)) 
+            self.x = np.add(self.x, np.matmul(K,err)) # x = x + K*(y-h(x))
+            self.x[2,0] = wrap_to_pi(self.x[2,0])
+            debug_print('Update: ' + str(self.x))
+            self.P = np.matmul(np.subtract(np.eye(len(self.x)),np.matmul(K,H)),self.P) # (I-K*H)*P 
+        self.data['state'] = self.x
+        #self.q.put(self.data)
 
 class slam_node():
     def __init__(self):
-        rospy.Subscriber("/landmarks", lm_array, self.lm_callback)
+        rospy.Subscriber("/tf", TFMessage, self.lm_callback)
         rospy.Subscriber("/odom", Odometry, self.odom_callback)
         self.q = multiprocessing.Queue()
         self.slam_obj = SLAM(self.q)
@@ -447,22 +431,17 @@ class slam_node():
     # Callback upon reciving new landmarks, updating state estimate
     def lm_callback(self, data):
         # if pose is unitialized, wait for initialization and let these landmarks be consumed
-        while(self.lock):
-            time.sleep(.1)
-
-        self.lock = True
         if self.slam_obj.poseInit:
-            self.slam_obj.landmark_update(data)
-        self.lock = False
+            for tfm in data.transforms:
+                do_nother = True
+                # if tfm.child_frame_id == "landmark":
+                #     self.slam_obj.landmark_update(tfm.transform.translation)
 
     # Use odometry and prediction model to update state  
     def odom_callback(self, data):
         # if pose is unitialized, initialize it with first data
-        while(self.lock):
-            time.sleep(.1)
-        self.lock = True 
         if self.slam_obj.poseInit:
-            self.t2 = data.header.stamp.secs
+            self.t2 = time.time()
             time_delta = self.t2 - self.t1
             dx = time_delta*data.twist.twist.linear.x
             dy = time_delta*data.twist.twist.linear.y
@@ -470,15 +449,15 @@ class slam_node():
             self.slam_obj.odom_update(dx,dy,dt)
             self.t1 = self.t2
         else:
-            self.t1 = data.header.stamp.secs
+            self.t1 = time.time()
+            x_angle = 2 * np.arccos(data.pose.pose.orientation.w)
             self.slam_obj.x = np.array([[data.pose.pose.position.x],
                                         [data.pose.pose.position.y],
-                                        [data.pose.pose.orientation.x]])
+                                        [x_angle]])
             self.slam_obj.dX = 0
             self.slam_obj.dY = 0
             self.slam_obj.dT = 0
             self.slam_obj.poseInit = True
-        self.lock = False
 
 
 
