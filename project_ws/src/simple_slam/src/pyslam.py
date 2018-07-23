@@ -249,7 +249,7 @@ class SLAM():
     def __init__(self, q):
         # Initialized state vector, covariance, etc 
         self.poseInit = False 
-        self.r_t = 0.05                                    # Threshold for assosciation
+        self.r_t = 0.1                                    # Threshold for assosciation
         self.v_r = 0.05                                  # Measurement error ratio
         self.v_b = 0.005
         self.x = None
@@ -316,7 +316,7 @@ class SLAM():
         # lm = np.array([m_x,m_y,1])
         # meas_landmark = np.matmul(A,lm)
         # meas_landmark = np.delete(meas_landmark,[2,2])
-        meas_landmark = np.array([[self.x[0,0]+np.cos(self.x[2,0])*data.x,self.x[1,0]+np.sin(self.x[2,0])*data.y]])
+        meas_landmark = np.array([[self.x[0,0]+np.cos(self.x[2,0])*data.x-np.sin(self.x[2,0])*data.y, self.x[1,0]+np.cos(self.x[2,0])*data.y+np.sin(self.x[2,0])*data.x]])
         debug_print('Observed landmark: ' + str(meas_landmark))
 
         # Calculate depth and noise for observed landmark
@@ -434,22 +434,22 @@ class slam_node():
         if self.slam_obj.poseInit:
             for tfm in data.transforms:
                 do_nother = True
-                # if tfm.child_frame_id == "landmark":
-                #     self.slam_obj.landmark_update(tfm.transform.translation)
+                if tfm.child_frame_id == "landmark":
+                    self.slam_obj.landmark_update(tfm.transform.translation)
 
     # Use odometry and prediction model to update state  
     def odom_callback(self, data):
         # if pose is unitialized, initialize it with first data
         if self.slam_obj.poseInit:
-            self.t2 = time.time()
-            time_delta = self.t2 - self.t1
+            self.t2 = float(data.header.stamp.secs) + (float(data.header.stamp.nsecs)*(10^-9))
+            time_delta = 0.05
             dx = time_delta*data.twist.twist.linear.x
             dy = time_delta*data.twist.twist.linear.y
-            dt = time_delta*data.twist.twist.angular.x
+            dt = time_delta*data.twist.twist.angular.z
             self.slam_obj.odom_update(dx,dy,dt)
             self.t1 = self.t2
         else:
-            self.t1 = time.time()
+            self.t1 = float(data.header.stamp.secs) + (float(data.header.stamp.nsecs)*(10^-9))
             x_angle = 2 * np.arccos(data.pose.pose.orientation.w)
             self.slam_obj.x = np.array([[data.pose.pose.position.x],
                                         [data.pose.pose.position.y],
