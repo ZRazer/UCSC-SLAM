@@ -50,8 +50,11 @@ class StdOutListener():
         self.start_time = None
         self.x = []
         self.y = []
+        self.real_x = []
+        self.real_y = []
         self.lx = []
         self.ly = []
+        self.iterator = 0
         self.my_average = []
         self.sub = self.fig.add_subplot(111)
         self.sub.set_xlabel('x (m)')
@@ -62,12 +65,13 @@ class StdOutListener():
         self.sub.yaxis.label.set_color('black')
         self.sub.tick_params(axis = 'x', colors = 'black')
         self.sub.tick_params(axis = 'y', colors = 'black')
-        self.sub.plot(self.x, self.y, color='blue')       # line stores a Line2D we have just updated with X/Y data
+        self.sub.plot(self.x, self.y, '.-',color='blue')       # line stores a Line2D we have just updated with X/Y data
         self.sub.scatter(self.lx, self.ly, color = 'red')
+        self.sub.plot(self.real_x,self.real_y, color='green')
  
     # On_data adds new y val to a set of values and calculates x value based off time
     # method also plots avg X val over time. For now, plots xmin/ymin to show all data
-    def on_data(self, x):
+    def on_data(self, x, pose):
         ax = canvas[self.num].figure.axes[0]
         ax.cla()
         self.sub.set_xlabel('x (m)')
@@ -75,7 +79,10 @@ class StdOutListener():
         self.sub.set_ylabel('y (m)')
         self.x.append(x[0,0])
         self.y.append(x[1,0])
-        self.sub.plot(self.x, self.y, color='blue') 
+        self.real_x.append(pose[0])
+        self.real_y.append(pose[1])
+        self.sub.plot(self.x, self.y, '.-',color='blue')  
+        self.sub.plot(self.real_x,self.real_y, color='green')
         # keep track of which landmark we are dealing with
         i = 0
         numLandmarks = int((len(x)-3)/2)
@@ -137,7 +144,9 @@ def updateGraph(out_listener, q, textBoxes):
             return
         # This list must be expanded if graphs are added/modified
         data = dict_data['state']
-        out_listener[0].on_data(data)
+        out_listener[0].iterator = out_listener[0].iterator + 1
+        if out_listener[0].iterator%20 == 0:
+            out_listener[0].on_data(data,dict_data['real_pose'])
         textBoxes[0].configure(state = 'normal')
         textBoxes[0].delete('1.0', Tk.END)
         textBoxes[0].insert(Tk.INSERT, "Pose:\nx: " + str(int(data[0,0])) + "\ny: " + str(int(data[1,0])) + "\ntheta: " + str(int(data[2,0]*180/np.pi)))
@@ -249,16 +258,16 @@ class SLAM():
     def __init__(self, q):
         # Initialized state vector, covariance, etc 
         self.poseInit = False 
-        self.r_t = 0.1                                    # Threshold for assosciation
+        self.r_t = 0.2                                    # Threshold for assosciation
         self.v_r = 0.05                                  # Measurement error ratio
         self.v_b = 0.005
         self.x = None
-        self.P = np.array([[0.1,0,0],[0,0.1,0],[0,0,np.pi/4]]) # Covariance matrix
+        self.P = np.array([[0.05,0,0],[0,0.05,0],[0,0,np.pi/16]]) # Covariance matrix
 
         # Process noise intensity matrix 
-        self.Gamma = np.array([[0.05, 0.005],
-            [0.05, 0.005],
-            [  0, 0.001]])
+        self.Gamma = np.array([[0.01, 0.0005],
+            [0.01, 0.0005],
+            [  0, 0.005]])
         self.dX = None
         self.dY = None
         self.dT = None
@@ -403,7 +412,7 @@ class SLAM():
             K2 = np.matmul(self.P,np.transpose(H))               # P*H^T
             K = np.matmul(K2,inv(np.add(K1,R)))                     # P*H^T(H*P*H^T + R)^-1
             # Use kalman gain to generate estimate and update covariance
-            err = pred-meas
+            err = meas-pred
             err[1] = wrap_to_pi(err[1])
             debug_print('Error: ' + str(err))
             debug_print('Gain: ' + str(K)) 
@@ -433,23 +442,25 @@ class slam_node():
         # if pose is unitialized, wait for initialization and let these landmarks be consumed
         if self.slam_obj.poseInit:
             for tfm in data.transforms:
-                do_nother = True
+                do_nother = False
                 if tfm.child_frame_id == "landmark":
                     self.slam_obj.landmark_update(tfm.transform.translation)
 
     # Use odometry and prediction model to update state  
     def odom_callback(self, data):
         # if pose is unitialized, initialize it with first data
+        self.slam_obj.data['real_pose'] = np.array([[data.pose.pose.position.x],
+                                        [data.pose.pose.position.y]])
         if self.slam_obj.poseInit:
-            self.t2 = float(data.header.stamp.secs) + (float(data.header.stamp.nsecs)*(10^-9))
-            time_delta = 0.05
+            self.t2 = data.header.stamp.secs + data.header.stamp.nsecs*1e-9
+            time_delta = self.t2-self.t1
             dx = time_delta*data.twist.twist.linear.x
             dy = time_delta*data.twist.twist.linear.y
             dt = time_delta*data.twist.twist.angular.z
             self.slam_obj.odom_update(dx,dy,dt)
             self.t1 = self.t2
         else:
-            self.t1 = float(data.header.stamp.secs) + (float(data.header.stamp.nsecs)*(10^-9))
+            self.t1  = data.header.stamp.secs + data.header.stamp.nsecs*1e-9
             x_angle = 2 * np.arccos(data.pose.pose.orientation.w)
             self.slam_obj.x = np.array([[data.pose.pose.position.x],
                                         [data.pose.pose.position.y],
