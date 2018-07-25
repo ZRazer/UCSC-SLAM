@@ -15,7 +15,7 @@
 
 #define PI 3.14159265
 // define RVIZ for rviz visualization of features, otherwise normal operation with slam
-#define RVIZ 
+//#define RVIZ 
 
 struct Point
 {

@@ -262,16 +262,17 @@ class SLAM():
         self.v_r = 0.05                                  # Measurement error ratio
         self.v_b = 0.005
         self.x = None
-        self.P = np.array([[0.05,0,0],[0,0.05,0],[0,0,np.pi/16]]) # Covariance matrix
+        self.P = np.array([[0.1,0,0],[0,0.1,0],[0,0,0.01]]) # Covariance matrix
 
         # Process noise intensity matrix 
-        self.Gamma = np.array([[0.01, 0.0005],
-            [0.01, 0.0005],
-            [  0, 0.005]])
+        # self.Gamma = np.array([[0.5, 0.005],
+        #     [0.5, 0.005],
+        #     [  0, 0.1]])
         self.dX = None
         self.dY = None
         self.dT = None
         self.q = q
+        self.time_delta = None
         self.data = {}
 
     def odom_update(self,dx,dy,dt):
@@ -293,9 +294,12 @@ class SLAM():
             [0, 1, self.dX],
             [0, 0, 1]])
 
-        r1 = np.matmul(np.matmul(self.Gamma,np.identity(2)), np.transpose(self.Gamma)) # Gamma*Q*Gamma^T
+        #r1 = np.matmul(np.matmul(self.Gamma,np.identity(2)), np.transpose(self.Gamma)) # Gamma*Q*Gamma^T
+        W = np.array([[self.dX],[self.dY],[self.dT]])
+        C = 5
+        Q = np.matmul(W*C,np.transpose(W))
         r2 = np.matmul(np.matmul(Phi,self.P[0:3,0:3]), np.transpose(Phi))         # Phi*P*Phi^T
-        self.P[0:3,0:3] = r1 + r2
+        self.P[0:3,0:3] = r2 + Q
 
         if len(self.P) > 3:
             temp = np.matmul(Phi,self.P[0:3,3:len(self.P)])
@@ -374,7 +378,7 @@ class SLAM():
         if r >= self.r_t:
             self.x = np.concatenate((self.x,[[meas_landmark[0,0]],[meas_landmark[0,1]]]),axis=0)
             debug_print('Landmark appended to state vector, new state vector: ' + str(self.x))
-            Jz = np.array([[np.cos(self.x[2,0]+self.dT), -self.dY],[np.sin(self.x[2,0]+self.dT), self.dX]])
+            Jz = np.array([[np.cos(self.x[2,0]+self.dT), -self.time_delta*np.sin(self.x[2,0]+self.dT)],[np.sin(self.x[2,0]+self.dT), self.time_delta*np.cos(self.x[2,0]+self.dT)]])
             C = np.matmul(Phi[0:2,0:3],np.matmul(self.P[0:3,0:3],np.transpose(Phi[0:2,0:3]))) + np.matmul(Jz,np.matmul(R,np.transpose(Jz))) # Jxr*P*Jxr^T + R (iden)
             G = np.matmul(self.P[0:3,0:3],np.transpose(Phi[0:2,0:3]))                                 # P*Jxr^T
             if num_landmarks > 0:
@@ -425,7 +429,7 @@ class SLAM():
 
 class slam_node():
     def __init__(self):
-        rospy.Subscriber("/tf", TFMessage, self.lm_callback)
+        # rospy.Subscriber("/tf", TFMessage, self.lm_callback)
         rospy.Subscriber("/odom", Odometry, self.odom_callback)
         self.q = multiprocessing.Queue()
         self.slam_obj = SLAM(self.q)
@@ -440,23 +444,31 @@ class slam_node():
     # Callback upon reciving new landmarks, updating state estimate
     def lm_callback(self, data):
         # if pose is unitialized, wait for initialization and let these landmarks be consumed
+        while self.lock == True:
+            time.sleep(0.001)
+
+        self.lock = True
         if self.slam_obj.poseInit:
             for tfm in data.transforms:
-                do_nother = False
                 if tfm.child_frame_id == "landmark":
                     self.slam_obj.landmark_update(tfm.transform.translation)
+        self.lock = False
 
     # Use odometry and prediction model to update state  
     def odom_callback(self, data):
         # if pose is unitialized, initialize it with first data
+        while self.lock == True:
+            time.sleep(0.001)
+
+        self.lock = True
         self.slam_obj.data['real_pose'] = np.array([[data.pose.pose.position.x],
                                         [data.pose.pose.position.y]])
         if self.slam_obj.poseInit:
             self.t2 = data.header.stamp.secs + data.header.stamp.nsecs*1e-9
-            time_delta = self.t2-self.t1
-            dx = time_delta*data.twist.twist.linear.x
-            dy = time_delta*data.twist.twist.linear.y
-            dt = time_delta*data.twist.twist.angular.z
+            self.slam_obj.time_delta = self.t2-self.t1
+            dx = self.slam_obj.time_delta*data.twist.twist.linear.x
+            dy = self.slam_obj.time_delta*data.twist.twist.linear.y
+            dt = self.slam_obj.time_delta*data.twist.twist.angular.z
             self.slam_obj.odom_update(dx,dy,dt)
             self.t1 = self.t2
         else:
@@ -469,6 +481,8 @@ class slam_node():
             self.slam_obj.dY = 0
             self.slam_obj.dT = 0
             self.slam_obj.poseInit = True
+
+        self.lock = False
 
 
 
