@@ -36,7 +36,7 @@ if sys.version_info[0] < 3:
 else:
     import queue
 
-am_debugging = False
+am_debugging = True
 
 def debug_print(inp_str):
     if am_debugging:
@@ -77,6 +77,8 @@ class StdOutListener():
         self.sub.set_xlabel('x (m)')
         # List probably needs to be changed if any graphs are modified/added
         self.sub.set_ylabel('y (m)')
+        self.x.append(x[0,0])
+        self.y.append(x[1,0])
         self.real_x.append(pose[0])
         self.real_y.append(pose[1])
         self.sub.plot(self.x, self.y, '.-',color='blue')  
@@ -89,13 +91,13 @@ class StdOutListener():
             self.ly = []
             if numLandmarks == 1:
                 for r in np.arange(-landmarks[0],landmarks[0],landmarks[0]/20):
-                    self.lx.append(x[3+2*(j),0] + r*np.cos(landmarks[1]))
-                    self.ly.append(x[4+2*(j),0] + r*np.sin(landmarks[1]))
+                    self.lx.append(landmarks[2] + r*np.cos(landmarks[1]))
+                    self.ly.append(landmarks[3] + r*np.sin(landmarks[1]))
                 self.sub.plot(self.lx, self.ly, color='red')
             elif numLandmarks > 1:
                 for r in np.arange(-landmarks[i,0],landmarks[i,0],landmarks[i,0]/20):
-                    self.lx.append(x[3+2*(j),0] + r*np.cos(landmarks[i,1]))
-                    self.ly.append(x[4+2*(j),0] + r*np.sin(landmarks[i,1]))
+                    self.lx.append(landmarks[i,2] + r*np.cos(landmarks[i,1]))
+                    self.ly.append(landmarks[i,3] + r*np.sin(landmarks[i,1]))
                 self.sub.plot(self.lx, self.ly, color='red')
             i = i + 1
 
@@ -145,7 +147,7 @@ def updateGraph(out_listener, q, textBoxes):
         try:
             dict_data = q.get(block=False)
         except queue.Empty:
-            root.after(1000, updateGraph, out_listener, q, textBoxes)
+            root.after(10, updateGraph, out_listener, q, textBoxes)
             return
         # This list must be expanded if graphs are added/modified
         data = dict_data['state']
@@ -160,12 +162,12 @@ def updateGraph(out_listener, q, textBoxes):
         textBoxes[1].delete('1.0', Tk.END)
         textBoxes[1].insert(Tk.INSERT, "Num landmarks:\n" + str(int((len(data)-3)/2)))
         textBoxes[1].configure(state = 'disabled')
-        root.after(1000, updateGraph, out_listener, q, textBoxes)
+        root.after(10, updateGraph, out_listener, q, textBoxes)
         return # Return to prevent extra after() call
     elif start == 2:
         for listener in out_listener:
             listener.on_data(np.random.randint(-5,50))
-    after_id = root.after(250, updateGraph, out_listener, 0, 0)
+    after_id = root.after(10, updateGraph, out_listener, 0, 0)
     if not start:
         if after_id is not None:
             root.after_cancel(after_id)
@@ -263,7 +265,7 @@ class SLAM():
     def __init__(self, q):
         # Initialized state vector, covariance, etc 
         self.poseInit = False 
-        self.r_t = 0.1                                    # Threshold for assosciation
+        self.r_t = 0.5                                   # Threshold for assosciation
         self.v_r = 0.05                                  # Measurement error ratio
         self.v_b = 0.005
         self.x = None
@@ -280,9 +282,10 @@ class SLAM():
         self.landmarks = None
         self.time_delta = 0
         self.data = {}
+        self.data['lm_info'] = None
 
     def odom_update(self,dx,dy,dt):
-        debug_print('Running odometry update')
+        debug_print('Running odometry update (x,y,t): (' + str(self.x[0,0]) + ',' + str(self.x[1,0]) + ',' + str(self.x[2,0]) + ')')
         self.dT = dt
         self.dX = dx
         self.dY = dy
@@ -312,7 +315,6 @@ class SLAM():
             self.P[0:3,3:len(self.P)] = temp
             self.P[3:len(self.P),0:3] = np.transpose(temp)
         self.data['state'] = self.x
-        self.data['lm_info'] = self.landmarks
         self.q.put(self.data)
 
     def landmark_update(self, data):
@@ -336,7 +338,21 @@ class SLAM():
             # lm = np.array([m_x,m_y,1])
             # meas_landmark = np.matmul(A,lm)
             # meas_landmark = np.delete(meas_landmark,[2,2])
-            meas_landmark = np.array([[landmark.x,landmark.y]])
+            landmark.angle = landmark.angle + self.x[2,0]
+            landmark_pos = np.array([[self.x[0,0]+np.cos(self.x[2,0])*landmark.x-np.sin(self.x[2,0])*landmark.y, self.x[1,0]+np.cos(self.x[2,0])*landmark.y+np.sin(self.x[2,0])*landmark.x]])
+            
+            # Find point on origin which passes through line (represented by large line segment)
+            p1_x = landmark_pos[0,0] + 10*np.cos(landmark.angle)
+            p1_y = landmark_pos[0,1] + 10*np.sin(landmark.angle)
+            p2_x = landmark_pos[0,0] - 10*np.cos(landmark.angle)
+            p2_y = landmark_pos[0,1] - 10*np.sin(landmark.angle)
+            m1 = (p2_y-p1_y)/(p2_x-p1_x)
+            m2 = -1/m1
+            debug_print('Finding closest point on line segment (' + str(p1_x) + ',' + str(p1_y) + ')-(' + str(p2_x) + ',' + str(p2_y) + ') to origin')
+            l_x = (m1*p1_x-p1_y) / (m1-m2)
+            l_y = m2*(l_x)
+            meas_landmark = np.array([[l_x,l_y]])
+            
             debug_print('Observed landmark: ' + str(meas_landmark))
 
             # Calculate depth and noise for observed landmark
@@ -395,9 +411,10 @@ class SLAM():
                 self.P = np.concatenate((M2,M1),axis=0)                                             # New Cov Matrix
 
                 if num_landmarks == 0:
-                    self.landmarks = np.array([landmark.radius, landmark.angle])
+                    self.landmarks = np.array([landmark.radius, landmark.angle, landmark_pos[0,0], landmark_pos[0,1]])
                 else:
-                    self.landmarks = np.vstack((self.landmarks, np.array([landmark.radius, landmark.angle])))
+                    self.landmarks = np.vstack((self.landmarks, np.array([landmark.radius, landmark.angle, landmark_pos[0,0], landmark_pos[0,1]])))
+                self.data['lm_info'] = self.landmarks
                 # If known correspondance, we run an update from that landmark    
             else: 
                 # predicted landmark found from ML estimator
@@ -435,8 +452,7 @@ class SLAM():
                 self.x[2,0] = wrap_to_pi(self.x[2,0])
                 debug_print('Update: ' + str(self.x))
                 self.P = np.matmul(np.subtract(np.eye(len(self.x)),np.matmul(K,H)),self.P) # (I-K*H)*P 
-            self.data['state'] = self.x
-            self.data['lm_info'] = self.landmarks
+            self.data['state'] = self.x 
             #self.q.put(self.data)
 
 class slam_node():

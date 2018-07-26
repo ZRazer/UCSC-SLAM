@@ -36,7 +36,7 @@ struct Line
 	double getYforX(double x) {
 		if(vline)
 		{
-			ROS_DEBUG("Called getYforX for vline");
+			ROS_INFO("Called getYforX for vline");
 		}
 		else
 		{
@@ -108,7 +108,7 @@ struct Line
 			angle = PI/2;
 			radius = (ymax - ymin)/2;
 			R = temp;
-			ROS_DEBUG("Found line: x = %f , R val: %f , angle: %f, radius: %f", xmean,R,angle,radius);
+			ROS_INFO("Found line: x = %f , R val: %f , angle: %f, radius: %f", xmean,R,angle,radius);
 		}
 		else 
 		{
@@ -131,7 +131,7 @@ struct Line
 			radius = sqrt(pow((xmax-xmin),2) + pow((ymax-ymin),2))/2;
 
 			R = temp;
-			ROS_DEBUG("Found line: y = %fx + %f , R val: %f , angle: %f, radius: %f", _slope,_yInt,R,angle,radius);
+			ROS_INFO("Found line: y = %fx + %f , R val: %f , angle: %f, radius: %f", _slope,_yInt,R,angle,radius);
 		}
 		return true;
 	}
@@ -151,14 +151,14 @@ public:
 #else
 		marker_pub = nh.advertise<slam_node::lm_array>("/landmarks",10);
 #endif
-		ROS_DEBUG("Initialized cloud_parse object...");
+		ROS_INFO("Initialized cloud_parse object...");
 		maxLines = 0;
 	}
 
   // Callback function upon recieving point cloud
 	void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 	{
-		ROS_DEBUG("Running cb for recieved point cloud.");
+		ROS_INFO("Running cb for recieved point cloud.");
 		std::vector<Point> points;
 		points.clear();
 		std::vector<Line> lines;
@@ -188,20 +188,15 @@ public:
 		pcl::fromROSMsg(output,msg_);
 
 	// Set ground reference point
-		float ground = 0.18;
+		float ground = 0;
 
 	// Filter points by z-coord and add to points vector
 		int nPoints = msg_.points.size();
 		for(int i=0; i<nPoints; i++) 
 		{
-			if(msg_.points[i].z >= ground && msg_.points[i].z <= ground + 0.1)
-			{ 
-				temp._x = msg_.points[i].x;
-				temp._y = msg_.points[i].y;
-				points.push_back(temp);
-				// ROS_DEBUG("Adding point (%f,%f) to set S. ",temp._x,temp._y);
-				// r.sleep();
-			}
+			temp._x = msg_.points[i].x;
+			temp._y = msg_.points[i].y;
+			points.push_back(temp);
 		}
 
   	// Split and merge line extraction
@@ -259,7 +254,7 @@ public:
 			}
 		}
 
-		ROS_DEBUG("Publishing %lu lines.", line_strip_array.markers.size());
+		ROS_INFO("Publishing %lu lines.", line_strip_array.markers.size());
 
 		for (int i=nMarkers;i<maxLines;i++)
 		{
@@ -278,13 +273,18 @@ public:
 		double x,y;
 		for (int i=0;i<nLines;i++)
 		{
-			x = (lines[i].xmax + lines[i].xmin) / 2;
-		    y = (lines[i].ymax + lines[i].ymin) / 2;
-			landmark.x = x;
-			landmark.y = y;
-			landmark.radius = lines[i].radius; 
-			landmark.angle = lines[i].angle;
-			landmarks.landmarks.push_back(landmark);
+			if (lines[i].nPoints >= 15)
+			{
+				x = (lines[i].xmax + lines[i].xmin) / 2;
+			    y = (lines[i].ymax + lines[i].ymin) / 2;
+				landmark.x = x;
+				landmark.y = y;
+				landmark.radius = lines[i].radius; 
+				landmark.angle = lines[i].angle;
+				landmark.slope = lines[i]._slope;
+				landmark.intercept = lines[i]._yInt;
+				landmarks.landmarks.push_back(landmark);
+			}
 		}
 		marker_pub.publish(landmarks);
 		landmarks.landmarks.clear();
@@ -295,13 +295,13 @@ public:
 	// Function runs split and merge algorithm on set of points to find all lines within that set
 	std::vector<Line> split_and_merge(std::vector<Point> S)
 	{
-		ROS_DEBUG("Running split and merge on set S:");
+		ROS_INFO("Running split and merge on set S:");
 		std::vector<Point> temp_p1, temp_p2, temp_p3;
 		std::vector< std::vector<Point> > points;
 		std::vector<Line> lines;
 		Line line;
 		int nSets, nPts;
-		double split_threshold = 1e-3, merge_threshold = 1e-2;
+		double split_threshold = 1e-3, merge_threshold = 1e-1;
 		bool split_and_extract = true, merged;
 		points.push_back(S);
 		ros::Rate r(100);
@@ -317,7 +317,7 @@ public:
 				if (line.fitPoints(points[i]) != true)
 				{
 					// Remove singular set and do not fit line to it
-					ROS_DEBUG("Attempted to fit line to single point.");
+					ROS_INFO("Attempted to fit line to single point.");
 					points.erase(points.begin() + i);
 				}
 				else
@@ -334,7 +334,7 @@ public:
 			// if greatest outlier is bigger than threshold distance from line, split set 
 				if (lines[i].R > split_threshold)
 				{
-					ROS_DEBUG("Splitting set S[%i] of size %lu with xmin,xmax (%f,%f) and ymin, ymax(%f,%f)",i, points[i].size(), lines[i].xmin,lines[i].xmax,lines[i].ymin,lines[i].ymax);
+					ROS_INFO("Splitting set S[%i] of size %lu with xmin,xmax (%f,%f) and ymin, ymax(%f,%f)",i, points[i].size(), lines[i].xmin,lines[i].xmax,lines[i].ymin,lines[i].ymax);
 					split = true;
 					nPts = points[i].size();
 
@@ -345,12 +345,12 @@ public:
 					{
 						if (j <= floor(nPts/2))
 						{
-							ROS_DEBUG("Adding point (%f,%f) to temp set S1",points[i][j]._x, points[i][j]._y);
+							ROS_INFO("Adding point (%f,%f) to temp set S1",points[i][j]._x, points[i][j]._y);
 							temp_p1.push_back(points[i][j]);
 						}
 						if (j >= floor(nPts/2))
 						{
-							ROS_DEBUG("Adding point (%f,%f) to temp set S2",points[i][j]._x, points[i][j]._y);
+							ROS_INFO("Adding point (%f,%f) to temp set S2",points[i][j]._x, points[i][j]._y);
 							temp_p2.push_back(points[i][j]);
 						}
 						// r.sleep();
@@ -363,13 +363,13 @@ public:
 					if (temp_p1.size() > 1)
 					{
 						points.push_back(temp_p1);
-						ROS_DEBUG("Using temp set S1 with size %lu",temp_p1.size());
+						ROS_INFO("Using temp set S1 with size %lu",temp_p1.size());
 					} 
 
 					if (temp_p2.size() > 1)
 					{
 						points.push_back(temp_p2);
-						ROS_DEBUG("Using temp set S2 with size %lu",temp_p2.size());
+						ROS_INFO("Using temp set S2 with size %lu",temp_p2.size());
 					} 
 
 					
@@ -401,7 +401,7 @@ public:
 			// if co-linear check fit, otherwise change nothing
 				if(std::fabs(std::fabs(lines[i].angle) - std::fabs(lines[j].angle)) <= 0.2 ) 
 				{
-					ROS_DEBUG("Checking if co-linear lines can be merged");
+					ROS_INFO("Checking if co-linear lines can be merged");
 					temp_p3.clear();
 				// First add all points into temp set 3
 					for(int k=0;k<points[i].size();k++)
@@ -419,7 +419,7 @@ public:
 					// if line works remove old lines and sets of points, add new line and set
 						if(line.R < merge_threshold)
 						{
-							ROS_DEBUG("From set of %lu lines, merging lines %i and %i.",lines.size(),i,j);
+							ROS_INFO("From set of %lu lines, merging lines %i and %i.",lines.size(),i,j);
 							lines.erase(lines.begin() + i);
 							points.erase(points.begin() + i);
 							lines.erase(lines.begin() + (j-1));
@@ -434,12 +434,12 @@ public:
 
 		}
 		nSets = lines.size();
-		ROS_DEBUG("Found %i lines to fit PointCloud. ",nSets);
+		ROS_INFO("Found %i lines to fit PointCloud. ",nSets);
 
 		// Print some debug info on final set of lines saved
 		for (int i=0;i<nSets;i++)
 		{
-			ROS_DEBUG("Line %i size: %lu", i,lines[i].nPoints);
+			ROS_INFO("Line %i size: %lu", i,lines[i].nPoints);
 		}
 		return lines;
 	}
