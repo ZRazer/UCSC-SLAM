@@ -67,7 +67,7 @@ class StdOutListener():
         self.sub.tick_params(axis = 'y', colors = 'black')
         self.sub.plot(self.x, self.y, '.-',color='blue')       # line stores a Line2D we have just updated with X/Y data
         self.sub.scatter(self.lx, self.ly, color = 'red')
-        self.sub.plot(self.real_x,self.real_y, color='green')
+        self.sub.plot(self.real_x,self.real_y, '.-', color='green')
  
     # On_data adds new y val to a set of values and calculates x value based off time
     # method also plots avg X val over time. For now, plots xmin/ymin to show all data
@@ -82,7 +82,7 @@ class StdOutListener():
         self.real_x.append(pose[0])
         self.real_y.append(pose[1])
         self.sub.plot(self.x, self.y, '.-',color='blue')  
-        self.sub.plot(self.real_x,self.real_y, color='green') 
+        self.sub.plot(self.real_x,self.real_y, '.-', color='green') 
         # keep track of which landmark we are dealing with
         i = 0
         numLandmarks = int((len(x)-3)/2)
@@ -265,9 +265,10 @@ class SLAM():
     def __init__(self, q):
         # Initialized state vector, covariance, etc 
         self.poseInit = False 
-        self.r_t = 0.5                                   # Threshold for assosciation
-        self.v_r = 0.05                                  # Measurement error ratio
-        self.v_b = 0.005
+        self.r_t = 0.3                                   # Threshold for assosciation
+        self.v_r = 3                                  # Measurement error ratio
+        self.v_b = 0.22
+        self.C = 1.45 # Process noise intensity val
         self.x = None
         self.P = np.array([[0.1,0,0],[0,0.1,0],[0,0,np.pi/4]]) # Covariance matrix
 
@@ -305,8 +306,7 @@ class SLAM():
 
         # r1 = np.matmul(np.matmul(self.Gamma,np.identity(2)), np.transpose(self.Gamma)) # Gamma*Q*Gamma^T
         W = np.array([[self.dX],[self.dY],[self.dT]])
-        C = 5 # Process noise intensity val
-        Q = np.matmul(W*C,np.transpose(W))
+        Q = np.matmul(W*self.C,np.transpose(W))
         r2 = np.matmul(np.matmul(Phi,self.P[0:3,0:3]), np.transpose(Phi))         # Phi*P*Phi^T
         self.P[0:3,0:3] = r2 + Q
 

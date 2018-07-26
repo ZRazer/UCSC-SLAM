@@ -15,7 +15,9 @@
 
 #define PI 3.14159265
 // define RVIZ for rviz visualization of features, otherwise normal operation with slam
-//#define RVIZ 
+//#define RVIZ
+// define lidar for lidar sensor, nothing for laser sensor
+//#define LIDAR 
 
 struct Point
 {
@@ -169,6 +171,11 @@ public:
 		pcl::PCLPointCloud2ConstPtr cloudPtr(cloud);
 		pcl::PCLPointCloud2 cloud_filtered;
 		ros::Rate r(100);
+#ifdef LIDAR
+		int lineSize = 15;
+#else 
+		int lineSize = 10;
+#endif		
 
   // Convert to PCL data type
 		pcl_conversions::toPCL(*cloud_msg, *cloud);
@@ -230,7 +237,7 @@ public:
 		int nMarkers = 0;
 		for (int i=0;i<nLines;i++)
 		{
-			if (lines[i].nPoints >= 15)
+			if (lines[i].nPoints >= lineSize)
 			{
 				// Get midpoint of line
 				x = (lines[i].xmax + lines[i].xmin) / 2;
@@ -273,7 +280,7 @@ public:
 		double x,y;
 		for (int i=0;i<nLines;i++)
 		{
-			if (lines[i].nPoints >= 15)
+			if (lines[i].nPoints >= lineSize)
 			{
 				x = (lines[i].xmax + lines[i].xmin) / 2;
 			    y = (lines[i].ymax + lines[i].ymin) / 2;
@@ -301,7 +308,11 @@ public:
 		std::vector<Line> lines;
 		Line line;
 		int nSets, nPts;
-		double split_threshold = 1e-3, merge_threshold = 1e-1;
+#ifdef LIDAR 
+		double split_threshold = 1e-3, merge_threshold = 1e-2;
+#else
+		double split_threshold = 8e-4, merge_threshold = 1e-2;
+#endif
 		bool split_and_extract = true, merged;
 		points.push_back(S);
 		ros::Rate r(100);
@@ -343,11 +354,19 @@ public:
 					temp_p2.clear();
 					for (int j=0;j<nPts;j++)
 					{
+#ifdef LIDAR
 						if (j <= floor(nPts/2))
 						{
 							ROS_INFO("Adding point (%f,%f) to temp set S1",points[i][j]._x, points[i][j]._y);
 							temp_p1.push_back(points[i][j]);
 						}
+#else
+						if (j < floor(nPts/2))
+						{
+							ROS_INFO("Adding point (%f,%f) to temp set S1",points[i][j]._x, points[i][j]._y);
+							temp_p1.push_back(points[i][j]);
+						}
+#endif
 						if (j >= floor(nPts/2))
 						{
 							ROS_INFO("Adding point (%f,%f) to temp set S2",points[i][j]._x, points[i][j]._y);

@@ -429,7 +429,7 @@ class SLAM():
 
 class slam_node():
     def __init__(self):
-        # rospy.Subscriber("/tf", TFMessage, self.lm_callback)
+        rospy.Subscriber("/tf", TFMessage, self.lm_callback)
         rospy.Subscriber("/odom", Odometry, self.odom_callback)
         self.q = multiprocessing.Queue()
         self.slam_obj = SLAM(self.q)
