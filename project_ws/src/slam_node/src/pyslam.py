@@ -37,6 +37,7 @@ else:
     import queue
 
 am_debugging = True
+no_bearing = False
 
 def debug_print(inp_str):
     if am_debugging:
@@ -265,10 +266,10 @@ class SLAM():
     def __init__(self, q):
         # Initialized state vector, covariance, etc 
         self.poseInit = False 
-        self.r_t = 0.3                                   # Threshold for assosciation
-        self.v_r = 3                                  # Measurement error ratio
-        self.v_b = 0.22
-        self.C = 1.45 # Process noise intensity val
+        self.r_t = 0                                 # Threshold for assosciation
+        self.v_r = 3                               # Measurement error ratio
+        self.v_b = 0.45
+        self.C = 1.65 # Process noise intensity val
         self.x = None
         self.P = np.array([[0.1,0,0],[0,0.1,0],[0,0,np.pi/4]]) # Covariance matrix
 
@@ -358,9 +359,12 @@ class SLAM():
             # Calculate depth and noise for observed landmark
             meas_range = np.sqrt(np.square(meas_landmark[0,0]-self.x[0,0])+np.square(meas_landmark[0,1]-self.x[1,0]))
             meas_bearing = np.arctan((meas_landmark[0,1]-self.x[1,0])/(meas_landmark[0,0]-self.x[0,0])) - self.x[2,0]
-            meas_bearing = wrap_to_pi(meas_bearing)
-            R = np.array([[self.v_r*meas_range , 0],
-                [0,  self.v_b*meas_range]])
+            #meas_bearing = wrap_to_pi(meas_bearing)
+            if no_bearing is False:
+                R = np.array([[self.v_r*meas_range , 0],
+                 [0,  self.v_b*meas_range]])
+            else:
+                R = self.v_r*meas_range
             
             # Use ML estimator for data assosciation
             residuals = np.array([])
@@ -374,15 +378,22 @@ class SLAM():
 
                 # Construct H matrix rows, append 0s and 1s depending on which landmark is considered, then stack rows
                 hr1 = np.array([(self.x[0,0]-pred_landmark[0])/pred_range, (self.x[1,0]-pred_landmark[1])/pred_range, 0])
-                hr2 = np.array([(pred_landmark[1]-self.x[1,0])/np.square(pred_range), (pred_landmark[0]-self.x[0,0])/np.square(pred_range), -1])
+                if no_bearing is False:
+                    hr2 = np.array([(pred_landmark[1]-self.x[1,0])/np.square(pred_range), (pred_landmark[0]-self.x[0,0])/np.square(pred_range), -1])
                 for val in range(num_landmarks):
                     if val == i:
                         hr1 = np.append(hr1,[-(self.x[0,0]-pred_landmark[0])/pred_range, -(self.x[1,0]-pred_landmark[1])/pred_range])
-                        hr2 = np.append(hr2,[-(pred_landmark[1]-self.x[1,0])/np.square(pred_range), -(pred_landmark[0]-self.x[0,0])/np.square(pred_range)])
+                        if no_bearing is False:
+                            hr2 = np.append(hr2,[-(pred_landmark[1]-self.x[1,0])/np.square(pred_range), -(pred_landmark[0]-self.x[0,0])/np.square(pred_range)])
                     else:
                         hr1 = np.append(hr1,[0, 0])
-                        hr2 = np.append(hr2,[0, 0])
-                H = np.vstack((hr1,hr2))
+                        if no_bearing is False:
+                            hr2 = np.append(hr2,[0, 0])
+                if no_bearing is False:
+                    H = np.vstack((hr1,hr2))
+                else:
+                    H = hr1
+
                 Kappa = np.matmul(H,np.matmul(self.P,np.transpose(H))) + R
                 #residuals = np.append(residuals,np.matmul((meas_landmark-pred_landmark),np.matmul(inv(Kappa),np.transpose(meas_landmark-pred_landmark))))
                 rsD = 0.5*np.sqrt(np.matmul((meas_landmark-pred_landmark),np.transpose(meas_landmark-pred_landmark)))
@@ -401,8 +412,11 @@ class SLAM():
             if r >= self.r_t:
                 self.x = np.concatenate((self.x,[[meas_landmark[0,0]],[meas_landmark[0,1]]]),axis=0)
                 debug_print('Landmark appended to state vector, new state vector: ' + str(self.x))
-                Jz = np.array([[np.cos(self.x[2,0]+self.dT), -self.time_delta*np.sin(self.x[2,0]+self.dT)],[np.sin(self.x[2,0]+self.dT), self.time_delta*np.cos(self.x[2,0]+self.dT)]])
-                C = np.matmul(Phi[0:2,0:3],np.matmul(self.P[0:3,0:3],np.transpose(Phi[0:2,0:3]))) + np.matmul(Jz,np.matmul(R,np.transpose(Jz))) # Jxr*P*Jxr^T + R (iden)
+                if no_bearing is False:
+                    Jz = np.array([[np.cos(self.x[2,0]+self.dT), -self.time_delta*np.sin(self.x[2,0]+self.dT)],[np.sin(self.x[2,0]+self.dT), self.time_delta*np.cos(self.x[2,0]+self.dT)]])
+                else:
+                    Jz = np.array([[np.cos(self.x[2,0]+self.dT)],[np.sin(self.x[2,0]+self.dT)]])
+                C = np.matmul(Phi[0:2,0:3],np.matmul(self.P[0:3,0:3],np.transpose(Phi[0:2,0:3]))) + np.matmul(Jz,R*np.transpose(Jz)) # Jxr*P*Jxr^T + R (iden)
                 G = np.matmul(self.P[0:3,0:3],np.transpose(Phi[0:2,0:3]))                                 # P*Jxr^T
                 if num_landmarks > 0:
                     G = np.concatenate((G,np.zeros((int(2*num_landmarks),2))),axis=0)
@@ -424,31 +438,48 @@ class SLAM():
                 # Calculate depth and noise for observed landmark
                 pred_range = np.sqrt(np.square(pred_landmark[0]-self.x[0,0])+np.square(pred_landmark[1]-self.x[1,0]))
                 pred_bearing = np.arctan((pred_landmark[1]-self.x[1,0])/(pred_landmark[0]-self.x[0,0])) - self.x[2,0]
-                pred_bearing = wrap_to_pi(pred_bearing)
-                pred = np.array([[pred_range], [pred_bearing]])
-                meas = np.array([[meas_range], [meas_bearing]])
+                #pred_bearing = wrap_to_pi(pred_bearing)
+                if no_bearing is False:
+                    pred = np.array([[pred_range], [pred_bearing]])
+                    meas = np.array([[meas_range], [meas_bearing]])
+                else:
+                    pred = pred_range
+                    meas = meas_range
 
                 # Construct H matrix rows, append 0s and 1s depending on which landmark is considered, then stack rows
                 hr1 = np.array([(self.x[0,0]-pred_landmark[0])/pred_range, (self.x[1,0]-pred_landmark[1])/pred_range, 0])
-                hr2 = np.array([(pred_landmark[1]-self.x[1,0])/np.square(pred_range), (pred_landmark[0]-self.x[0,0])/np.square(pred_range), -1])
+                if no_bearing is False:
+                    hr2 = np.array([(pred_landmark[1]-self.x[1,0])/np.square(pred_range), (pred_landmark[0]-self.x[0,0])/np.square(pred_range), -1])
                 for val in range(num_landmarks):
                     if val == i:
                         hr1 = np.append(hr1,[-(self.x[0,0]-pred_landmark[0])/pred_range, -(self.x[1,0]-pred_landmark[1])/pred_range])
-                        hr2 = np.append(hr2,[-(pred_landmark[1]-self.x[1,0])/np.square(pred_range), -(pred_landmark[0]-self.x[0,0])/np.square(pred_range)])
+                        if no_bearing is False:
+                            hr2 = np.append(hr2,[-(pred_landmark[1]-self.x[1,0])/np.square(pred_range), -(pred_landmark[0]-self.x[0,0])/np.square(pred_range)])
                     else:
                         hr1 = np.append(hr1,[0, 0])
-                        hr2 = np.append(hr2,[0, 0])
-                H = np.vstack((hr1,hr2))
+                        if no_bearing is False:
+                            hr2 = np.append(hr2,[0, 0])
+                if no_bearing is False:
+                    H = np.vstack((hr1,hr2))
+                else:
+                    H = hr1
                 # compute kalman gain
                 K1 = np.matmul(H,np.matmul(self.P,np.transpose(H)))  # H*P*H^T
                 K2 = np.matmul(self.P,np.transpose(H))               # P*H^T
-                K = np.matmul(K2,inv(np.add(K1,R)))                     # P*H^T(H*P*H^T + R)^-1
+                if no_bearing is False:
+                    K = np.matmul(K2,inv(np.add(K1,R)))                     # P*H^T(H*P*H^T + R)^-1
+                else: 
+                    K = K2/(K1+R)
                 # Use kalman gain to generate estimate and update covariance
                 err = meas-pred
-                err[1] = wrap_to_pi(err[1])
-                debug_print('Error: ' + str(err))
-                debug_print('Gain: ' + str(K)) 
-                self.x = np.add(self.x, np.matmul(K,err)) # x = x + K*(y-h(x))
+                if no_bearing is False:
+                    err[1] = wrap_to_pi(err[1])
+                debug_print('Error: ' + str(err) + ' Pred: ' + str(pred) + ' Meas: ' + str(meas))
+                debug_print('Gain: ' + str(K))
+                if no_bearing is False: 
+                    self.x = np.add(self.x, np.matmul(K,err)) # x = x + K*(y-h(x))
+                else:
+                    self.x = np.add(self.x, np.transpose(np.array([K*err])))
                 self.x[2,0] = wrap_to_pi(self.x[2,0])
                 debug_print('Update: ' + str(self.x))
                 self.P = np.matmul(np.subtract(np.eye(len(self.x)),np.matmul(K,H)),self.P) # (I-K*H)*P 
